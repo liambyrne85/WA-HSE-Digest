@@ -165,7 +165,7 @@ export function createDemoApi(): Api {
     async getTemplateVersion(id: string) {
       return delay(db.versions.find((v) => v.id === id) ?? null);
     },
-    async saveRecord(input: { id: string; template_version_id: string; project_id: string | null; answers: Record<string, unknown>; status: 'draft' | 'submitted'; isNew: boolean }) {
+    async saveRecord(input: { id: string; template_version_id: string; project_id: string | null; answers: Record<string, unknown>; status: string; isNew: boolean }) {
       const m = requireMe();
       const version = db.versions.find((v) => v.id === input.template_version_id);
       if (!version) throw new Error('Template version not found');
@@ -179,6 +179,7 @@ export function createDemoApi(): Api {
       }
       const summary = computeSummary(version.schema, input.answers);
       const module = version.category as WorkflowModule;
+      if (m.role !== 'leader' && !['draft', 'submitted'].includes(input.status)) throw new Error(`Only leaders can move a record to "${input.status}"`);
       let status: string = input.status;
       let submitted_at = prev?.submitted_at ?? null;
       if (input.status === 'submitted' && (!prev || prev.status !== 'submitted')) {

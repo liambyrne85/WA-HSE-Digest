@@ -42,9 +42,12 @@ export default function RecordFormPage() {
     return { version, answers: {} as Answers, record: null, projects };
   }, [id, templateId]);
 
-  const save = async (answers: Answers, status: 'draft' | 'submitted') => {
+  const save = async (answers: Answers, requested: 'draft' | 'submitted') => {
     if (!data) return;
-    if (status === 'submitted' && data.version.schema.settings?.requireProject && !projectId) {
+    // A leader correcting a record that's already in progress keeps its current status.
+    const inProgress = data.record && !['draft', 'rejected', 'returned'].includes(data.record.status);
+    const status = inProgress ? data.record!.status : requested;
+    if (requested === 'submitted' && data.version.schema.settings?.requireProject && !projectId) {
       setProjectError('Choose the project or site');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -54,7 +57,7 @@ export default function RecordFormPage() {
       const row = await api.saveRecord({
         id: recordId, template_version_id: data.version.id, project_id: projectId || null, answers, status, isNew: !id,
       });
-      toast(status === 'draft' ? `Draft saved (${row.reference})` : `${row.reference} submitted`);
+      toast(inProgress ? `${row.reference} updated` : status === 'draft' ? `Draft saved (${row.reference})` : `${row.reference} submitted`);
       nav(`/records/${row.id}`, { replace: true });
     } catch (e) {
       toast(errMsg(e), 'error');
@@ -79,7 +82,7 @@ export default function RecordFormPage() {
           <h1 className="text-3xl font-bold uppercase leading-tight">{data.version.name}</h1>
           <div className="mt-1 flex flex-wrap gap-2">
             <Badge color="slate" dot={false}>Form v{data.version.version}</Badge>
-            {data.record?.submitted_at && <Badge color="amber">Returned for changes</Badge>}
+            {data.record?.submitted_at && ['draft', 'rejected', 'returned'].includes(data.record.status) && <Badge color="amber">Returned for changes</Badge>}
           </div>
         </div>
       </div>
@@ -87,7 +90,8 @@ export default function RecordFormPage() {
         schema={data.version.schema}
         initialAnswers={data.answers}
         busy={busy}
-        submitLabel={data.record?.submitted_at ? 'Resubmit' : 'Submit'}
+        submitLabel={data.record && !['draft', 'rejected', 'returned'].includes(data.record.status) ? 'Save changes'
+          : data.record?.submitted_at ? 'Resubmit' : 'Submit'}
         onSubmit={(a) => save(a, 'submitted')}
         onSaveDraft={!data.record || data.record.status === 'draft' ? (a) => save(a, 'draft') : undefined}
         header={

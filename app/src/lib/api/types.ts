@@ -10,8 +10,9 @@ export interface RecordInput {
   template_version_id: string;
   project_id: string | null;
   answers: Record<string, unknown>;
-  /** 'draft' or 'submitted' (the server picks the real submitted status) */
-  status: 'draft' | 'submitted';
+  /** 'draft' or 'submitted' (the server picks the real submitted status); leaders editing an
+   *  in-progress record pass its current status to keep it unchanged */
+  status: string;
   isNew: boolean;
 }
 
