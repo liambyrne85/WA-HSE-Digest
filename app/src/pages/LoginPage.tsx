@@ -112,10 +112,11 @@ export default function LoginPage() {
             <div className="card mt-4 p-5">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-xl font-bold uppercase">Demo accounts</h3>
-                <Badge color="amber">No database</Badge>
+                <Badge color="amber">Sample data</Badge>
               </div>
               <p className="mb-3 text-sm text-steel-600">
-                Supabase isn't configured, so the app is running on local demo data. Pick a user to see how each role experiences the app.
+                This is a demo with sample data. Pick a person to see the app as a Leader, an employee or a contractor.
+                Anything you change stays in this browser only; use “Reset demo data” to start again.
               </p>
               <div className="space-y-2">
                 {api.demoAccounts().map((a) => (

@@ -41,6 +41,7 @@ Safety Events, Daily Field Reports, Timesheets, Plant Pre-Starts, Risk Assessmen
 - **Supabase project:** `fieldops-hseq` (ref `yzqmxebdrryebrqodsie`, Sydney). Migrations in `supabase/migrations/` are applied and `invite-user` is deployed.
 - Rebuild the hosted copy with `npm run build:pages`, which writes `../fieldops`, `../404.html` (SPA deep links) and `../.nojekyll`. Commit those files.
 - `npm run build:preview` builds a single-file demo-mode copy for sharing a clickable preview.
+- **Public demo:** https://liambyrne85.github.io/WA-HSE-Digest/fieldops-demo/ is sample data only, with no database and no sign-up. Each visitor's changes stay in their own browser. Rebuild with `npm run build:demo`, which writes `../fieldops-demo`.
 
 ### Adding users
 Leaders can **email an invitation** or **set a temporary password**. With a temporary password the account is created straight away, and the person must choose their own password at first sign-in. Supabase's built-in email only delivers to members of your Supabase organisation, so add custom SMTP (Authentication → Emails) before relying on email invites.
