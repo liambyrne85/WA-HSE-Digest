@@ -1,0 +1,102 @@
+import type {
+  AppRole, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
+  LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
+  WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger,
+} from '../types';
+
+export interface Session {
+  userId: string;
+  email: string;
+}
+
+export interface InviteInput {
+  email: string;
+  full_name?: string;
+  role: AppRole;
+  organization_id: string;
+  job_role_id?: string | null;
+}
+
+export interface DemoAccount {
+  id: string;
+  label: string;
+  role: AppRole;
+  description: string;
+}
+
+/**
+ * Backend contract. Implemented by Supabase (production) and a localStorage
+ * demo backend that mirrors the RLS rules so the UI can be tried without a DB.
+ * Authorisation is ALWAYS enforced by Postgres RLS in production — the demo
+ * backend only imitates it.
+ */
+export interface Api {
+  mode: 'supabase' | 'demo';
+
+  // auth
+  getSession(): Promise<Session | null>;
+  onAuthChange(cb: (s: Session | null) => void): () => void;
+  signInWithPassword(email: string, password: string): Promise<void>;
+  signInWithMagicLink(email: string): Promise<void>;
+  sendPasswordReset(email: string): Promise<void>;
+  signOut(): Promise<void>;
+  demoAccounts?(): DemoAccount[];
+  demoSignIn?(userId: string): Promise<void>;
+  demoReset?(): void;
+
+  // profiles & orgs
+  getMyProfile(): Promise<Profile | null>;
+  listProfiles(): Promise<Profile[]>;
+  updateProfile(id: string, patch: Partial<Profile>): Promise<Profile>;
+  listOrganizations(): Promise<Organization[]>;
+  saveOrganization(org: Partial<Organization>): Promise<Organization>;
+
+  // invitations
+  listInvitations(): Promise<Invitation[]>;
+  inviteUser(input: InviteInput): Promise<Invitation>;
+  resendInvitation(id: string): Promise<void>;
+  revokeInvitation(id: string): Promise<void>;
+
+  // job roles & commercial rates
+  listJobRoles(): Promise<JobRole[]>;
+  saveJobRole(role: Partial<JobRole>): Promise<JobRole>;
+  listJobRoleRates(): Promise<JobRoleRate[]>;
+  saveJobRoleRate(rate: JobRoleRate): Promise<void>;
+
+  // projects
+  listProjects(): Promise<Project[]>;
+  saveProject(p: Partial<Project>): Promise<Project>;
+
+  // lookups
+  listLookupLists(): Promise<LookupList[]>;
+  saveLookupList(l: Partial<LookupList>): Promise<LookupList>;
+  listLookupValues(listKey?: string): Promise<LookupValue[]>;
+  saveLookupValue(v: Partial<LookupValue>): Promise<LookupValue>;
+  deleteLookupValue(id: string): Promise<void>;
+
+  // templates
+  listTemplates(): Promise<FormTemplate[]>;
+  getTemplate(id: string): Promise<FormTemplate | null>;
+  createTemplate(input: { name: string; category: TemplateCategory; description?: string }): Promise<FormTemplate>;
+  saveTemplateDraft(id: string, patch: Partial<FormTemplate>): Promise<FormTemplate>;
+  publishTemplate(id: string, changeNote?: string): Promise<FormTemplateVersion>;
+  listTemplateVersions(templateId: string): Promise<FormTemplateVersion[]>;
+  duplicateTemplate(id: string): Promise<FormTemplate>;
+
+  // workflow
+  listPipelines(): Promise<WorkflowPipeline[]>;
+  savePipeline(p: WorkflowPipeline): Promise<void>;
+  listRules(): Promise<WorkflowRule[]>;
+  saveRule(r: Partial<WorkflowRule>): Promise<WorkflowRule>;
+  deleteRule(id: string): Promise<void>;
+  testRules(module: WorkflowModule, event: WorkflowTrigger, record: Record<string, unknown>, old?: Record<string, unknown>): Promise<WorkflowRule[]>;
+
+  // tickets
+  listTickets(): Promise<WorkerTicket[]>;
+  saveTicket(t: Partial<WorkerTicket>): Promise<WorkerTicket>;
+  deleteTicket(id: string): Promise<void>;
+
+  // notifications
+  listNotifications(): Promise<Notification[]>;
+  markNotificationRead(id: string): Promise<void>;
+}

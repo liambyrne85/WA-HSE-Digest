@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-tap-highlight-color: transparent; }
+  body { @apply min-h-screen; }
+  h1, h2, h3 { @apply font-display tracking-wide; }
+  :focus-visible { @apply outline-none ring-2 ring-brand-500 ring-offset-2; }
+}
+
+@layer components {
+  .input {
+    @apply block w-full rounded-lg border-2 border-steel-200 bg-white px-3 py-2.5 text-base text-steel-900
+      placeholder:text-steel-400 focus:border-brand-500 focus:outline-none focus:ring-0 disabled:bg-steel-50 disabled:text-steel-500;
+  }
+  .label { @apply mb-1.5 block text-sm font-semibold text-steel-700; }
+  .card { @apply rounded-xl border border-steel-200 bg-white shadow-card; }
+  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+}
