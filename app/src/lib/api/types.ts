@@ -7,6 +7,8 @@ import type {
 export interface Session {
   userId: string;
   email: string;
+  /** Set when a leader created the account with a temporary password. */
+  mustChangePassword?: boolean;
 }
 
 export interface InviteInput {
@@ -15,6 +17,8 @@ export interface InviteInput {
   role: AppRole;
   organization_id: string;
   job_role_id?: string | null;
+  /** Create the account now with this password instead of emailing an invite. */
+  temp_password?: string;
 }
 
 export interface DemoAccount {
@@ -39,6 +43,9 @@ export interface Api {
   signInWithPassword(email: string, password: string): Promise<void>;
   signInWithMagicLink(email: string): Promise<void>;
   sendPasswordReset(email: string): Promise<void>;
+  /** Self sign-up. The very first account becomes the Leader; later ones wait for activation unless invited. */
+  signUp(email: string, password: string, fullName: string): Promise<{ needsConfirmation: boolean }>;
+  updatePassword(password: string): Promise<void>;
   signOut(): Promise<void>;
   demoAccounts?(): DemoAccount[];
   demoSignIn?(userId: string): Promise<void>;

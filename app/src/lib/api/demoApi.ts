@@ -1,7 +1,7 @@
 import type { Api, DemoAccount, Session } from './types';
 import { buildDemoSeed, type DemoDb } from './demoSeed';
 import type {
-  FormTemplate, FormTemplateVersion, Profile, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  FormTemplate, FormTemplateVersion, Invitation, Profile, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -119,6 +119,12 @@ export function createDemoApi(): Api {
     async sendPasswordReset() {
       throw new Error('Password reset needs Supabase — not available in demo mode.');
     },
+    async signUp() {
+      throw new Error('Creating accounts needs Supabase — in demo mode, pick one of the demo accounts.');
+    },
+    async updatePassword() {
+      throw new Error('Passwords need Supabase — not available in demo mode.');
+    },
     async signOut() {
       session = null;
       try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
@@ -210,10 +216,19 @@ export function createDemoApi(): Api {
       db.invitations.forEach((i) => { if (i.email === email && i.status === 'pending') i.status = 'revoked'; });
       const inv = {
         id: uuid(), email, full_name: input.full_name ?? null, role: input.role, organization_id: input.organization_id,
-        job_role_id: input.job_role_id ?? null, status: 'pending' as const, invited_by: session!.userId,
+        job_role_id: input.job_role_id ?? null, status: 'pending' as Invitation['status'], invited_by: session!.userId,
         expires_at: new Date(Date.now() + 14 * 864e5).toISOString(), created_at: nowIso(),
       };
       db.invitations.push(inv);
+      if (input.temp_password) {
+        // Mirror the server: the account exists immediately.
+        inv.status = 'accepted';
+        db.profiles.push({
+          id: uuid(), email, full_name: input.full_name || email.split('@')[0]!, role: input.role,
+          organization_id: input.organization_id, job_role_id: input.job_role_id ?? null, phone: null,
+          employee_number: null, emergency_contact_name: null, emergency_contact_phone: null, is_active: true, created_at: nowIso(),
+        });
+      }
       commit();
       return delay(inv);
     },

@@ -16,6 +16,10 @@ const cors = {
 
 type Body = {
   action?: "invite" | "resend" | "revoke";
+  /** Where the email link should land (must be in Auth > URL Configuration > Redirect URLs). */
+  redirect_to?: string;
+  /** Create the account immediately with this password instead of emailing an invite. */
+  temp_password?: string;
   invitation_id?: string;
   email?: string;
   full_name?: string;
@@ -34,7 +38,7 @@ Deno.serve(async (req) => {
   const url = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const appUrl = Deno.env.get("APP_URL") ?? undefined;
+  const envAppUrl = Deno.env.get("APP_URL") ?? undefined;
 
   // Caller's own client — RLS applies, so this proves they are an active leader.
   const caller = createClient(url, anonKey, {
@@ -52,6 +56,7 @@ Deno.serve(async (req) => {
     return json(400, { error: "Invalid JSON" });
   }
   const action = body.action ?? "invite";
+  const appUrl = body.redirect_to && /^https?:\/\//.test(body.redirect_to) ? body.redirect_to : envAppUrl;
 
   if (action === "revoke") {
     if (!body.invitation_id) return json(400, { error: "invitation_id required" });
@@ -96,6 +101,23 @@ Deno.serve(async (req) => {
   }).select().single();
   // enforce_role_org_match() rejects e.g. an employee attached to a contractor company.
   if (invErr) return json(400, { error: invErr.message });
+
+  if (body.temp_password) {
+    if (body.temp_password.length < 8) {
+      await admin.from("user_invitations").delete().eq("id", inv.id);
+      return json(400, { error: "Temporary password must be at least 8 characters" });
+    }
+    // handle_new_user() picks up the invitation row created above.
+    const { error: createErr } = await admin.auth.admin.createUser({
+      email, password: body.temp_password, email_confirm: true,
+      user_metadata: { full_name: body.full_name ?? "", must_change_password: true },
+    });
+    if (createErr) {
+      await admin.from("user_invitations").delete().eq("id", inv.id);
+      return json(400, { error: createErr.message });
+    }
+    return json(200, { invitation: { ...inv, status: "accepted" }, created: true });
+  }
 
   const { error: mailErr } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo: appUrl, data: { full_name: body.full_name ?? "" },

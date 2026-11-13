@@ -30,6 +30,12 @@ function RolePicker({ value, onChange }: { value: AppRole; onChange: (r: AppRole
   );
 }
 
+function makeTempPassword() {
+  const words = ['Dozer', 'Grader', 'Roller', 'Loader', 'Tipper', 'Crane', 'Bobcat', 'Scraper'];
+  const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)]!;
+  return `${pick(words)}-${pick(words)}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
 function companiesFor(role: AppRole, orgs: Organization[]) {
   const t: OrgType = role === 'contractor' ? 'contractor' : 'internal';
   return orgs.filter((o) => o.type === t && o.is_active);
@@ -46,8 +52,11 @@ function InviteModal({ orgs, jobRoles, onClose, onDone }: { orgs: Organization[]
   const [name, setName] = useState('');
   const [orgId, setOrgId] = useState('');
   const [jobRoleId, setJobRoleId] = useState('');
+  const [method, setMethod] = useState<'email' | 'password'>('email');
+  const [tempPassword, setTempPassword] = useState(() => makeTempPassword());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
   const toast = useToast();
   const companies = companiesFor(role, orgs);
 
@@ -62,9 +71,16 @@ function InviteModal({ orgs, jobRoles, onClose, onDone }: { orgs: Organization[]
     setBusy(true);
     setError(null);
     try {
-      await api.inviteUser({ email, full_name: name || undefined, role, organization_id: orgId, job_role_id: jobRoleId || null });
-      toast(`Invitation sent to ${email}`);
-      onDone();
+      await api.inviteUser({
+        email, full_name: name || undefined, role, organization_id: orgId, job_role_id: jobRoleId || null,
+        temp_password: method === 'password' ? tempPassword : undefined,
+      });
+      if (method === 'password') {
+        setCreated({ email, password: tempPassword });
+      } else {
+        toast(`Invitation sent to ${email}`);
+        onDone();
+      }
     } catch (e) {
       setError(errMsg(e));
     } finally {
@@ -72,11 +88,29 @@ function InviteModal({ orgs, jobRoles, onClose, onDone }: { orgs: Organization[]
     }
   };
 
+  if (created) {
+    return (
+      <Modal open onClose={onDone} title="Account created"
+        footer={<Button onClick={onDone}>Done</Button>}>
+        <div className="space-y-4">
+          <p className="text-steel-700">Give these sign-in details to the person directly (in person, SMS or phone). They'll be asked to choose their own password the first time they sign in.</p>
+          <dl className="space-y-3 rounded-xl border-2 border-steel-200 bg-steel-50 p-4">
+            <div><dt className="text-xs font-bold uppercase text-steel-500">Email</dt><dd className="select-all font-mono text-lg">{created.email}</dd></div>
+            <div><dt className="text-xs font-bold uppercase text-steel-500">Temporary password</dt><dd className="select-all font-mono text-lg">{created.password}</dd></div>
+          </dl>
+          <p className="text-xs text-steel-500">This password isn't shown again. If it's lost, delete the person's access and create them again, or have them use "Forgot password".</p>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal open onClose={onClose} title="Invite user" wide
+    <Modal open onClose={onClose} title="Add user" wide
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button onClick={submit} loading={busy} icon={<Mail className="h-5 w-5" />} disabled={!email}>Send invitation</Button>
+        <Button onClick={submit} loading={busy} icon={method === 'email' ? <Mail className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />} disabled={!email}>
+          {method === 'email' ? 'Send invitation' : 'Create account'}
+        </Button>
       </>}>
       <div className="space-y-4">
         {error && <ErrorBanner message={error} />}
@@ -103,9 +137,29 @@ function InviteModal({ orgs, jobRoles, onClose, onDone }: { orgs: Organization[]
             </Select>
           </Field>
         </div>
+        <div>
+          <span className="label">How will they get access?</span>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {([['email', 'Email an invitation', 'They get a link by email and set up their own sign-in.'],
+               ['password', 'Set a temporary password', "Account is created now. You pass on the details; they change the password at first sign-in."]] as const).map(([k, t, d]) => (
+              <button key={k} type="button" aria-pressed={method === k} onClick={() => setMethod(k)}
+                className={clsx('rounded-xl border-2 p-3 text-left', method === k ? 'border-brand-500 bg-brand-50' : 'border-steel-200 bg-white hover:border-steel-300')}>
+                <span className="block font-bold">{t}</span>
+                <span className="mt-1 block text-xs text-steel-600">{d}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        {method === 'password' && (
+          <Field label="Temporary password" hint="At least 8 characters. Shown again after the account is created.">
+            <div className="flex gap-2">
+              <Input value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} className="font-mono" />
+              <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => setTempPassword(makeTempPassword())} aria-label="Generate a new password" />
+            </div>
+          </Field>
+        )}
         <p className="rounded-lg bg-steel-50 p-3 text-xs text-steel-600">
-          The invitee receives an email link. Their role and company are locked in server-side from this invitation when they accept —
-          they can't choose them on sign-up.
+          Their role and company are set from here, on the server. People can't choose them when they sign in.
         </p>
       </div>
     </Modal>

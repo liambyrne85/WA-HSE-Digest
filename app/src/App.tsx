@@ -9,7 +9,7 @@ import LoginPage from './pages/LoginPage';
 import ModulePlaceholderPage from './pages/ModulePlaceholderPage';
 import NotFoundPage from './pages/NotFoundPage';
 import PendingAccessPage from './pages/PendingAccessPage';
-import ProfilePage from './pages/ProfilePage';
+import ProfilePage, { PasswordCard } from './pages/ProfilePage';
 import ProjectsPage from './pages/ProjectsPage';
 import TrainingPage from './pages/TrainingPage';
 import TemplateBuilderPage from './pages/admin/TemplateBuilderPage';
@@ -36,6 +36,13 @@ export default function App() {
     );
   }
   if (!profile || !profile.is_active) return <PendingAccessPage />;
+  if (session.mustChangePassword) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-steel-900 p-4">
+        <div className="w-full max-w-lg"><PasswordCard required /></div>
+      </div>
+    );
+  }
 
   return (
     <AppShell>

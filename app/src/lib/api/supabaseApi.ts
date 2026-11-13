@@ -18,8 +18,10 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
 
-  const toSession = (s: { user: { id: string; email?: string } } | null): Session | null =>
-    s ? { userId: s.user.id, email: s.user.email ?? '' } : null;
+  const toSession = (s: { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } } | null): Session | null =>
+    s ? { userId: s.user.id, email: s.user.email ?? '', mustChangePassword: s.user.user_metadata?.must_change_password === true } : null;
+  // Full app URL including any sub-path the app is served from (e.g. GitHub Pages).
+  const appUrl = () => new URL(import.meta.env.BASE_URL, window.location.origin).toString();
 
   async function uid() {
     const { data } = await sb.auth.getSession();
@@ -28,7 +30,7 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
   }
 
   async function invoke(body: Record<string, unknown>) {
-    const { data, error } = await sb.functions.invoke('invite-user', { body });
+    const { data, error } = await sb.functions.invoke('invite-user', { body: { redirect_to: appUrl(), ...body } });
     if (error) {
       // Surface the function's JSON error message when available.
       const ctx = (error as { context?: Response }).context;
@@ -56,10 +58,20 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       check(await sb.auth.signInWithPassword({ email, password }));
     },
     async signInWithMagicLink(email) {
-      check(await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: window.location.origin } }));
+      check(await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: appUrl() } }));
     },
     async sendPasswordReset(email) {
-      check(await sb.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/profile` }));
+      check(await sb.auth.resetPasswordForEmail(email, { redirectTo: `${appUrl()}profile` }));
+    },
+    async signUp(email, password, fullName) {
+      const { data, error } = await sb.auth.signUp({
+        email, password, options: { data: { full_name: fullName }, emailRedirectTo: appUrl() },
+      });
+      if (error) throw new Error(error.message);
+      return { needsConfirmation: !data.session };
+    },
+    async updatePassword(password) {
+      check(await sb.auth.updateUser({ password, data: { must_change_password: false } }));
     },
     async signOut() {
       await sb.auth.signOut();

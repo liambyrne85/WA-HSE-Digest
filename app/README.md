@@ -14,6 +14,16 @@ Mobile-first React + Tailwind + Supabase app. Phase 1 is the foundation the late
 | Workflow & notification rules engine (rules, approval chains, alerts, status pipelines, dropdown lists, dry-run tester) | `src/pages/admin/WorkflowPage.tsx`, `run_workflow_rules()` / `test_workflow_rules()` |
 | Role-aware dashboard with quick actions | `src/pages/DashboardPage.tsx`, `src/components/layout/quickActions.ts` |
 
+## Live deployment
+
+- **App:** https://liambyrne85.github.io/WA-HSE-Digest/fieldops/ (GitHub Pages, served from `/fieldops` on `main`)
+- **Supabase project:** `fieldops-hseq` (ref `yzqmxebdrryebrqodsie`, Sydney). Migrations in `supabase/migrations/` are applied and `invite-user` is deployed.
+- Rebuild the hosted copy with `npm run build:pages`, which writes `../fieldops`, `../404.html` (SPA deep links) and `../.nojekyll`. Commit those files.
+- `npm run build:preview` builds a single-file demo-mode copy for sharing a clickable preview.
+
+### Adding users
+Leaders can **email an invitation** or **set a temporary password**. With a temporary password the account is created straight away, and the person must choose their own password at first sign-in. Supabase's built-in email only delivers to members of your Supabase organisation, so add custom SMTP (Authentication → Emails) before relying on email invites.
+
 ## Running it
 
 ```bash

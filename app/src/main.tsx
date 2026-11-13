@@ -23,7 +23,7 @@ const router = createRouter([
       </AuthProvider>
     ),
   },
-]);
+], { basename: import.meta.env.VITE_MEMORY_ROUTER === '1' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
