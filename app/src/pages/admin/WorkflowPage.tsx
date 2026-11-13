@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Badge, Button, Card, Checkbox, EmptyState, ErrorBanner, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle,
 } from '../../components/ui';
+import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { api } from '../../lib/api';
 import { MODULE_FIELDS, MODULE_LABEL, OPERATOR_LABEL, ROLE_LABEL, TRIGGER_LABEL } from '../../lib/labels';
@@ -446,6 +447,7 @@ function ListsTab({ lists, values, onChanged }: { lists: LookupList[]; values: L
   const [newCode, setNewCode] = useState('');
   const [newList, setNewList] = useState<{ name: string; key: string; visible: boolean } | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
   const list = lists.find((l) => l.key === key);
   const items = values.filter((v) => v.list_key === key).sort((a, b) => a.sort_order - b.sort_order);
 
@@ -503,7 +505,7 @@ function ListsTab({ lists, values, onChanged }: { lists: LookupList[]; values: L
                 <Button variant="ghost" size="sm" aria-label="Move up" disabled={i === 0} icon={<ArrowUp className="h-4 w-4" />} onClick={() => swap(i, -1)} />
                 <Button variant="ghost" size="sm" aria-label="Move down" disabled={i === items.length - 1} icon={<ArrowDown className="h-4 w-4" />} onClick={() => swap(i, 1)} />
                 <Button variant="ghost" size="sm" aria-label={`Delete ${v.label}`} icon={<Trash2 className="h-4 w-4 text-red-600" />}
-                  onClick={() => window.confirm(`Delete “${v.label}”? Prefer switching it off if it's used on existing records.`) && run(() => api.deleteLookupValue(v.id), 'Value deleted')} />
+                  onClick={async () => (await confirm({ title: 'Delete value', message: `Delete “${v.label}”? If it's used on existing records, switch it off instead.`, confirmLabel: 'Delete', danger: true })) && run(() => api.deleteLookupValue(v.id), 'Value deleted')} />
               </li>
             ))}
             {!items.length && <li className="px-3 py-6 text-center text-sm text-steel-500">No values yet.</li>}
@@ -614,6 +616,7 @@ export default function WorkflowPage() {
   const [tab, setTab] = useState<Tab>('rules');
   const [editing, setEditing] = useState<Partial<WorkflowRule> | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
   const { data, loading, error, reload, setData } = useAsync(async () => {
     const [rules, pipelines, lists, values, jobRoles] = await Promise.all([
       api.listRules(), api.listPipelines(), api.listLookupLists(), api.listLookupValues(), api.listJobRoles(),
@@ -633,7 +636,7 @@ export default function WorkflowPage() {
     }
   };
   const del = async (r: WorkflowRule) => {
-    if (!window.confirm(`Delete rule “${r.name}”?`)) return;
+    if (!(await confirm({ title: 'Delete rule', message: `Delete rule “${r.name}”? This can't be undone.`, confirmLabel: 'Delete', danger: true }))) return;
     try { await api.deleteRule(r.id); toast('Rule deleted'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
   };
 

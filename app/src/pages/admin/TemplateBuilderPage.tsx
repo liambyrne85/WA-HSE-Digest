@@ -8,6 +8,7 @@ import { FormRenderer } from '../../components/forms/FormRenderer';
 import {
   Badge, Button, Checkbox, EmptyState, ErrorBanner, Field, Input, Modal, Select, Spinner, Tabs, Textarea, Toggle,
 } from '../../components/ui';
+import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { api } from '../../lib/api';
 import { QUESTION_TYPE, TEMPLATE_CATEGORY, TEMPLATE_STATUS, formatDate } from '../../lib/labels';
@@ -233,6 +234,7 @@ export default function TemplateBuilderPage() {
   const [sideTab, setSideTab] = useState<'preview' | 'versions'>('preview');
   const [previewKey, setPreviewKey] = useState(0);
   const isDesktop = useIsDesktop();
+  const confirm = useConfirm();
 
   const load = async () => {
     setLoading(true);
@@ -258,8 +260,8 @@ export default function TemplateBuilderPage() {
   const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
   useEffect(() => {
     if (blocker.state === 'blocked') {
-      if (window.confirm('You have unsaved changes. Leave without saving?')) blocker.proceed();
-      else blocker.reset();
+      void confirm({ title: 'Unsaved changes', message: 'You have unsaved changes. Leave without saving?', confirmLabel: 'Leave', danger: true })
+        .then((ok) => (ok ? blocker.proceed() : blocker.reset()));
     }
   }, [blocker]);
   useEffect(() => {
@@ -368,8 +370,8 @@ export default function TemplateBuilderPage() {
         <SectionEditor key={s.id} s={s} index={i} count={schema.sections.length} lists={lists}
           onChange={(ns) => setSections(schema.sections.map((x) => (x.id === s.id ? ns : x)))}
           onMove={(d) => setSections(move(schema.sections, i, d))}
-          onDelete={() => {
-            if (s.questions.length && !window.confirm(`Delete section "${s.title || 'Untitled'}" and its ${s.questions.length} question(s)?`)) return;
+          onDelete={async () => {
+            if (s.questions.length && !(await confirm({ title: 'Delete section', message: `Delete section "${s.title || 'Untitled'}" and its ${s.questions.length} question(s)?`, confirmLabel: 'Delete', danger: true }))) return;
             setSections(schema.sections.filter((x) => x.id !== s.id));
           }} />
       ))}
@@ -389,8 +391,8 @@ export default function TemplateBuilderPage() {
 
   const versionsPanel = (
     <VersionsPanel versions={versions} current={tpl.current_version} onView={setViewVersion}
-      onRestore={(v) => {
-        if (!window.confirm(`Replace the current draft with v${v.version}? Publish afterwards to make it live as a new version.`)) return;
+      onRestore={async (v) => {
+        if (!(await confirm({ title: `Restore v${v.version}`, message: `Replace the current draft with v${v.version}? Publish afterwards to make it live as a new version.`, confirmLabel: 'Restore' }))) return;
         updateSchema(structuredClone(v.schema));
         toast(`Draft restored from v${v.version} — save or publish to keep it`);
       }} />

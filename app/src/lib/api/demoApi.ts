@@ -121,7 +121,7 @@ export function createDemoApi(): Api {
     },
     async signOut() {
       session = null;
-      localStorage.removeItem(SESSION_KEY);
+      try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
       emit();
     },
     demoAccounts: () => accounts,
@@ -129,7 +129,7 @@ export function createDemoApi(): Api {
       const p = db.profiles.find((x) => x.id === userId);
       if (!p) throw new Error('Unknown demo user');
       session = { userId: p.id, email: p.email };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch { /* ignore */ }
       emit();
     },
     demoReset() {
