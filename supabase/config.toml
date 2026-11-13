@@ -1,0 +1,5 @@
+# Minimal Supabase CLI config. Run `supabase init` to regenerate a full file if needed.
+project_id = "ops-hseq"
+
+[functions.invite-user]
+verify_jwt = true
