@@ -58,13 +58,13 @@ const badgeColors: Record<BadgeColor, string> = {
   slate: 'bg-steel-100 text-steel-700 ring-steel-300',
   blue: 'bg-blue-50 text-blue-800 ring-blue-300',
   amber: 'bg-amber-50 text-amber-900 ring-amber-300',
-  orange: 'bg-brand-50 text-brand-800 ring-brand-300',
+  orange: 'bg-orange-50 text-orange-800 ring-orange-300',
   green: 'bg-emerald-50 text-emerald-800 ring-emerald-300',
   red: 'bg-red-50 text-red-800 ring-red-300',
   purple: 'bg-violet-50 text-violet-800 ring-violet-300',
 };
 const dotColors: Record<BadgeColor, string> = {
-  slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-brand-500',
+  slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-orange-500',
   green: 'bg-emerald-500', red: 'bg-red-500', purple: 'bg-violet-500',
 };
 
@@ -116,7 +116,7 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
 export function Select({ className, children, ...p }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select className={clsx('input appearance-none bg-[length:20px] bg-[right_10px_center] bg-no-repeat pr-10', className)}
-      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23515c73' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")" }}
+      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%234a5670' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")" }}
       {...p}>
       {children}
     </select>
@@ -297,7 +297,7 @@ export function Avatar({ name, size = 'md', className }: { name: string; size?: 
 
 export function StatCard({ label, value, icon, tone = 'slate', hint, placeholder }: { label: string; value: ReactNode; icon?: ReactNode; tone?: BadgeColor; hint?: string; placeholder?: boolean }) {
   const toneBar: Record<BadgeColor, string> = {
-    slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-brand-500',
+    slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-orange-500',
     green: 'bg-emerald-500', red: 'bg-red-500', purple: 'bg-violet-500',
   };
   return (

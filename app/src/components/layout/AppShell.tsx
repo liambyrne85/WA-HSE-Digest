@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Bell, ChevronRight, HardHat, LogOut, Menu, Plus, X } from 'lucide-react';
+import { Bell, ChevronRight, LogOut, Menu, Plus, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -7,18 +7,14 @@ import { api } from '../../lib/api';
 import { ROLE_COLOR, ROLE_LABEL, formatDate } from '../../lib/labels';
 import type { Notification } from '../../lib/types';
 import { Avatar, Badge } from '../ui';
+import { BrandLockup } from './BrandMark';
 import { navFor, SECTION_LABEL, type NavItem } from './nav';
 import { quickActionsFor } from './quickActions';
 
 function Brand({ dark = true }: { dark?: boolean }) {
   return (
-    <Link to="/" className="flex items-center gap-2.5">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-white">
-        <HardHat className="h-5 w-5" />
-      </span>
-      <span className={clsx('font-display text-2xl font-bold uppercase leading-none tracking-wide', dark ? 'text-white' : 'text-steel-900')}>
-        Field<span className="text-brand-500">Ops</span>
-      </span>
+    <Link to="/" aria-label="Home">
+      <BrandLockup dark={dark} size="sm" />
     </Link>
   );
 }
@@ -145,7 +141,7 @@ function QuickLogSheet({ open, onClose }: { open: boolean; onClose: () => void }
               key={a.to + a.label}
               to={a.to}
               onClick={onClose}
-              className={clsx('flex min-h-[96px] flex-col items-start justify-between rounded-xl p-3 text-white', a.className)}
+              className={clsx('flex min-h-[96px] flex-col items-start justify-between rounded-xl p-3', a.className)}
             >
               <a.icon className="h-7 w-7" />
               <span className="text-base font-bold leading-tight">{a.label}</span>
@@ -199,7 +195,7 @@ function BottomNav({ onQuick, onMenu }: { onQuick: () => void; onMenu: () => voi
         <NavLink to="/projects" className={cls}><Projects className="h-6 w-6" />Sites</NavLink>
         <div className="flex flex-1 items-start justify-center">
           <button onClick={onQuick} aria-label="Quick log"
-            className="-mt-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-brand-500/40 ring-4 ring-white active:bg-brand-600">
+            className="-mt-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-hivis-500 text-steel-900 shadow-lg shadow-steel-900/30 ring-4 ring-white active:bg-hivis-400">
             <Plus className="h-8 w-8" strokeWidth={3} />
           </button>
         </div>

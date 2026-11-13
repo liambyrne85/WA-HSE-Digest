@@ -43,16 +43,16 @@ export default function DashboardPage() {
   return (
     <div>
       {/* Hero */}
-      <div className="mb-6 overflow-hidden rounded-2xl bg-steel-900 text-white">
+      <div className="mb-6 overflow-hidden rounded-2xl bg-brand-500 text-white">
         <div className="relative px-5 py-6 sm:px-7">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-brand-500/20 blur-2xl" />
-          <p className="text-xs font-bold uppercase tracking-widest text-brand-400">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+          <p className="text-xs font-bold uppercase tracking-widest text-hivis-400">
             {new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
           <h1 className="mt-1 text-3xl font-bold uppercase sm:text-4xl">
             {greeting()}, {profile?.full_name.split(' ')[0]}
           </h1>
-          <p className="mt-1 text-sm text-steel-300">
+          <p className="mt-1 text-sm text-white/85">
             {isLeader && 'Here\'s what needs your attention across all sites and contractors.'}
             {role === 'employee' && 'Log your records, check your tickets and stay safe out there.'}
             {isContractor && <>Signed in for <span className="font-bold text-white">{myOrg?.name}</span> — you only see your own company's data.</>}
@@ -66,11 +66,11 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           {actions.map((a) => (
             <Link key={a.label} to={a.to}
-              className={clsx('group flex min-h-[112px] flex-col justify-between rounded-xl p-4 text-white shadow-card transition-transform active:scale-[0.98]', a.className)}>
+              className={clsx('group flex min-h-[112px] flex-col justify-between rounded-xl p-4 shadow-card transition-transform active:scale-[0.98]', a.className)}>
               <a.icon className="h-8 w-8" />
               <span>
                 <span className="block text-base font-bold leading-tight">{a.label}</span>
-                <span className="mt-0.5 hidden text-xs text-white/75 sm:block">{a.description}</span>
+                <span className="mt-0.5 hidden text-xs opacity-80 sm:block">{a.description}</span>
               </span>
             </Link>
           ))}

@@ -96,8 +96,8 @@ export function createDemoApi(): Api {
   };
 
   const accounts: DemoAccount[] = [
-    { id: 'u-leader', label: 'Sam Carter', role: 'leader', description: 'Project Manager · Ironbark Civil (Leader)' },
-    { id: 'u-emp', label: 'Jordan Reid', role: 'employee', description: 'Plant Operator · Ironbark Civil (Employee)' },
+    { id: 'u-leader', label: 'Sam Carter', role: 'leader', description: 'Project Manager · Access & Site (Leader)' },
+    { id: 'u-emp', label: 'Jordan Reid', role: 'employee', description: 'Plant Operator · Access & Site (Employee)' },
     { id: 'u-acme1', label: 'Alice Nguyen', role: 'contractor', description: 'Supervisor · Acme Earthworks (Contractor)' },
     { id: 'u-bravo1', label: 'Ben Hughes', role: 'contractor', description: 'Supervisor · Bravo Traffic Mgmt (Contractor)' },
     { id: 'u-pending', label: 'Casey Morgan', role: 'employee', description: 'Self-registered, awaiting activation' },

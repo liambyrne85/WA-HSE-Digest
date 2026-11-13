@@ -180,15 +180,15 @@ export function buildDemoSeed(): DemoDb {
 
   return {
     organizations: [
-      org(ORG_INTERNAL, 'Ironbark Civil Group', 'internal', { abn: '12 345 678 901', contact_email: 'hseq@ironbarkcivil.example' }),
+      org(ORG_INTERNAL, 'Access & Site Services', 'internal', { abn: '12 345 678 901', contact_email: 'hseq@accesssite.example' }),
       org(ORG_ACME, 'Acme Earthworks Pty Ltd', 'contractor', { abn: '98 765 432 100', contact_name: 'Alice Nguyen', contact_email: 'alice@acme.example', contact_phone: '0412 555 101' }),
       org(ORG_BRAVO, 'Bravo Traffic Management', 'contractor', { contact_name: 'Ben Hughes', contact_email: 'ben@bravo.example', contact_phone: '0412 555 202' }),
     ],
     profiles: [
-      person('u-leader', 'Sam Carter', 'sam.carter@ironbarkcivil.example', 'leader', ORG_INTERNAL, 'jr-pm', { phone: '0400 111 222', employee_number: 'E-1001' }),
-      person('u-hseq', 'Priya Shah', 'priya.shah@ironbarkcivil.example', 'leader', ORG_INTERNAL, 'jr-hseq', { employee_number: 'E-1002' }),
-      person('u-emp', 'Jordan Reid', 'jordan.reid@ironbarkcivil.example', 'employee', ORG_INTERNAL, 'jr-op', { phone: '0400 333 444', employee_number: 'E-1040', emergency_contact_name: 'Kim Reid', emergency_contact_phone: '0400 999 000' }),
-      person('u-emp2', 'Mia Thompson', 'mia.thompson@ironbarkcivil.example', 'employee', ORG_INTERNAL, 'jr-lh', { employee_number: 'E-1051' }),
+      person('u-leader', 'Sam Carter', 'sam.carter@accesssite.example', 'leader', ORG_INTERNAL, 'jr-pm', { phone: '0400 111 222', employee_number: 'E-1001' }),
+      person('u-hseq', 'Priya Shah', 'priya.shah@accesssite.example', 'leader', ORG_INTERNAL, 'jr-hseq', { employee_number: 'E-1002' }),
+      person('u-emp', 'Jordan Reid', 'jordan.reid@accesssite.example', 'employee', ORG_INTERNAL, 'jr-op', { phone: '0400 333 444', employee_number: 'E-1040', emergency_contact_name: 'Kim Reid', emergency_contact_phone: '0400 999 000' }),
+      person('u-emp2', 'Mia Thompson', 'mia.thompson@accesssite.example', 'employee', ORG_INTERNAL, 'jr-lh', { employee_number: 'E-1051' }),
       person('u-acme1', 'Alice Nguyen', 'alice@acme.example', 'contractor', ORG_ACME, 'jr-ss', { phone: '0412 555 101' }),
       person('u-acme2', 'Tom Walsh', 'tom@acme.example', 'contractor', ORG_ACME, 'jr-op'),
       person('u-acme3', 'Ravi Patel', 'ravi@acme.example', 'contractor', ORG_ACME, 'jr-lab'),
@@ -196,7 +196,7 @@ export function buildDemoSeed(): DemoDb {
       person('u-pending', 'Casey Morgan', 'casey.morgan@gmail.example', 'employee', ORG_INTERNAL, null, { is_active: false }),
     ],
     invitations: [
-      { id: 'inv-1', email: 'dan.oconnor@ironbarkcivil.example', full_name: "Dan O'Connor", role: 'employee', organization_id: ORG_INTERNAL, job_role_id: 'jr-td', status: 'pending', invited_by: 'u-leader', expires_at: day(12), created_at: now },
+      { id: 'inv-1', email: 'dan.oconnor@accesssite.example', full_name: "Dan O'Connor", role: 'employee', organization_id: ORG_INTERNAL, job_role_id: 'jr-td', status: 'pending', invited_by: 'u-leader', expires_at: day(12), created_at: now },
       { id: 'inv-2', email: 'crew@bravo.example', full_name: 'Bravo crew lead', role: 'contractor', organization_id: ORG_BRAVO, job_role_id: 'jr-lh', status: 'pending', invited_by: 'u-hseq', expires_at: day(5), created_at: now },
     ],
     jobRoles,
@@ -280,7 +280,7 @@ export function buildDemoSeed(): DemoDb {
       { id: 't-4', profile_id: 'u-acme2', organization_id: ORG_ACME, ticket_type: 'Construction Induction (White Card)', ticket_number: 'WC-11002', issuer: 'WorkSafe WA', issued_on: '2020-01-01', expires_on: null, verified_at: null, created_at: now },
       { id: 't-5', profile_id: 'u-acme3', organization_id: ORG_ACME, ticket_type: 'Working at Heights', ticket_number: 'WAH-5521', issuer: 'Safety Training WA', issued_on: '2024-02-01', expires_on: day(-3), verified_at: null, created_at: now },
       { id: 't-6', profile_id: 'u-acme1', organization_id: ORG_ACME, ticket_type: 'First Aid (HLTAID011)', ticket_number: 'FA-12001', issuer: 'St John WA', issued_on: '2025-01-01', expires_on: day(400), verified_at: now, created_at: now },
-      { id: 't-7', profile_id: 'u-bravo1', organization_id: ORG_BRAVO, ticket_type: 'Site Induction', ticket_number: null, issuer: 'Ironbark Civil', issued_on: '2026-02-02', expires_on: day(25), verified_at: null, created_at: now },
+      { id: 't-7', profile_id: 'u-bravo1', organization_id: ORG_BRAVO, ticket_type: 'Site Induction', ticket_number: null, issuer: 'Access & Site Services', issued_on: '2026-02-02', expires_on: day(25), verified_at: null, created_at: now },
     ],
     notifications: [
       { id: 'n-1', user_id: 'u-leader', title: 'Invitation pending', body: "Dan O'Connor hasn't accepted their invitation yet.", link: '/admin/users', read_at: null, created_at: now },

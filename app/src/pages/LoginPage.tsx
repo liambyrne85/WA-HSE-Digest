@@ -1,4 +1,5 @@
-import { HardHat, KeyRound, Mail, RotateCcw, UserPlus } from 'lucide-react';
+import { KeyRound, Mail, RotateCcw, UserPlus } from 'lucide-react';
+import { BrandLockup } from '../components/layout/BrandMark';
 import { useState } from 'react';
 import { Badge, Button, Field, Input } from '../components/ui';
 import { api } from '../lib/api';
@@ -47,14 +48,13 @@ export default function LoginPage() {
       {/* Hero */}
       <div className="relative flex flex-col justify-between overflow-hidden bg-steel-900 px-6 py-8 text-white lg:w-[46%] lg:px-12 lg:py-12">
         <div className="pointer-events-none absolute inset-0 opacity-[0.07]"
-          style={{ backgroundImage: 'repeating-linear-gradient(-45deg, #f97316 0 18px, transparent 18px 36px)' }} />
-        <div className="relative flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500"><HardHat className="h-6 w-6" /></span>
-          <span className="font-display text-3xl font-bold uppercase tracking-wide">Field<span className="text-brand-500">Ops</span></span>
+          style={{ backgroundImage: 'repeating-linear-gradient(-45deg, #f5b81a 0 18px, transparent 18px 36px)' }} />
+        <div className="relative">
+          <BrandLockup size="lg" />
         </div>
         <div className="relative mt-8 lg:mt-0">
           <h1 className="text-4xl font-bold uppercase leading-[0.95] sm:text-5xl lg:text-6xl">
-            Operations.<br />HSEQ.<br /><span className="text-brand-500">Workforce.</span>
+            Operations.<br />HSEQ.<br /><span className="text-hivis-500">Workforce.</span>
           </h1>
           <p className="mt-4 max-w-md text-steel-300">
             One place for your crews, contractors, sites, safety records and plant — built for the field, from the ute to the office.
