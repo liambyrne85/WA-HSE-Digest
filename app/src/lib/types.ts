@@ -3,7 +3,9 @@
 export type AppRole = 'leader' | 'employee' | 'contractor';
 export type OrgType = 'internal' | 'contractor';
 export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'completed' | 'closed';
-export type TemplateCategory = 'audit' | 'plant_prestart' | 'risk_assessment' | 'safety_event';
+export type TemplateCategory =
+  | 'audit' | 'plant_prestart' | 'risk_assessment' | 'safety_event'
+  | 'daily_field_report' | 'timesheet' | 'training';
 export type TemplateStatus = 'draft' | 'published' | 'archived';
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
 export type WorkflowModule =
@@ -104,7 +106,13 @@ export interface LookupValue {
 
 // ---- Dynamic forms --------------------------------------------------------
 export type QuestionType =
-  | 'pass_fail_na' | 'yes_no' | 'text' | 'number' | 'dropdown' | 'photo' | 'signature';
+  | 'pass_fail_na' | 'yes_no' | 'text' | 'number' | 'dropdown' | 'photo' | 'signature' | 'table';
+
+export interface TableColumn {
+  id: string;
+  label: string;
+  type: 'text' | 'number';
+}
 
 export interface Question {
   id: string;
@@ -126,6 +134,10 @@ export interface Question {
   photoOnFail?: boolean;
   /** a Fail on this question is a critical defect (feeds workflow rules) */
   critical?: boolean;
+  /** table: the columns each row has */
+  columns?: TableColumn[];
+  /** expose the answer to workflow rules under this name (e.g. severity, total_hours) */
+  fieldKey?: string;
 }
 
 export interface Section {
@@ -136,7 +148,12 @@ export interface Section {
 }
 
 export interface TemplateSchema {
-  settings?: { requireProject?: boolean; requireSignOff?: boolean };
+  settings?: {
+    requireProject?: boolean;
+    requireSignOff?: boolean;
+    /** status to use when a critical item fails on submit (e.g. defect_reported) */
+    criticalFailStatus?: string;
+  };
   sections: Section[];
 }
 
@@ -171,7 +188,8 @@ export interface FormTemplateVersion {
 export interface PipelineStatus {
   key: string;
   label: string;
-  color: BadgeColor;
+  /** a preset name or a custom #rrggbb colour */
+  color: BadgeColor | string;
   is_terminal: boolean;
 }
 
@@ -244,4 +262,64 @@ export interface Notification {
   link: string | null;
   read_at: string | null;
   created_at: string;
+}
+
+// ---- Records (field modules) ---------------------------------------------
+export interface RecordRow {
+  id: string;
+  template_version_id: string;
+  module: WorkflowModule;
+  reference: string | null;
+  title: string | null;
+  project_id: string | null;
+  organization_id: string | null;
+  submitted_by: string;
+  status: string;
+  answers: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  last_status_change_at: string;
+}
+
+export interface RecordApproval {
+  id: string;
+  submission_id: string;
+  rule_id: string | null;
+  step: number;
+  approver_role: AppRole;
+  job_role_id: string | null;
+  status: 'waiting' | 'pending' | 'approved' | 'rejected' | 'cancelled';
+  due_at: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface RecordEvent {
+  id: string;
+  submission_id: string;
+  kind: 'created' | 'status' | 'approval_requested' | 'approval' | 'comment';
+  from_status: string | null;
+  to_status: string | null;
+  body: string | null;
+  actor: string | null;
+  created_at: string;
+}
+
+export interface DirectoryEntry {
+  id: string;
+  full_name: string;
+  role: AppRole;
+  organization_id: string;
+}
+
+export interface AppSettings {
+  company_name: string;
+  primary_color: string;
+  accent_color: string;
+  dark_color: string;
+  logo_url: string | null;
 }

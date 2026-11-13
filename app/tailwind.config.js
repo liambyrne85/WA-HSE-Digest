@@ -8,16 +8,10 @@ export default {
         display: ['"Barlow Condensed"', 'Inter', 'system-ui', 'sans-serif'],
       },
       colors: {
-        // Access & Site Services brand: Access Blue primary, Night Shift navy neutrals, platform yellow accent.
-        brand: {
-          50: '#eef2fd', 100: '#dbe3fb', 200: '#b9c8f6', 300: '#8ea6ef', 400: '#5d7de4',
-          500: '#2047c6', 600: '#1b3dab', 700: '#17338e', 800: '#142a72', 900: '#11235c',
-        },
-        steel: {
-          50: '#f6f8fb', 100: '#eef1f6', 200: '#dce2ec', 300: '#bcc6d6', 400: '#8794ab',
-          500: '#63708a', 600: '#4a5670', 700: '#36415a', 800: '#222d47', 900: '#13213f', 950: '#0c1529',
-        },
-        hivis: { 50: '#fef8e7', 100: '#fdefc4', 300: '#f9d46f', 400: '#f8c94a', 500: '#f5b81a', 600: '#d99c0a', 700: '#a87806' },
+        // Brand palette from CSS variables (Leaders set the colours in Settings → Branding).
+        brand: { 50: 'rgb(var(--brand-50) / <alpha-value>)', 100: 'rgb(var(--brand-100) / <alpha-value>)', 200: 'rgb(var(--brand-200) / <alpha-value>)', 300: 'rgb(var(--brand-300) / <alpha-value>)', 400: 'rgb(var(--brand-400) / <alpha-value>)', 500: 'rgb(var(--brand-500) / <alpha-value>)', 600: 'rgb(var(--brand-600) / <alpha-value>)', 700: 'rgb(var(--brand-700) / <alpha-value>)', 800: 'rgb(var(--brand-800) / <alpha-value>)', 900: 'rgb(var(--brand-900) / <alpha-value>)' },
+        steel: { 50: 'rgb(var(--steel-50) / <alpha-value>)', 100: 'rgb(var(--steel-100) / <alpha-value>)', 200: 'rgb(var(--steel-200) / <alpha-value>)', 300: 'rgb(var(--steel-300) / <alpha-value>)', 400: 'rgb(var(--steel-400) / <alpha-value>)', 500: 'rgb(var(--steel-500) / <alpha-value>)', 600: 'rgb(var(--steel-600) / <alpha-value>)', 700: 'rgb(var(--steel-700) / <alpha-value>)', 800: 'rgb(var(--steel-800) / <alpha-value>)', 900: 'rgb(var(--steel-900) / <alpha-value>)', 950: 'rgb(var(--steel-950) / <alpha-value>)' },
+        hivis: { 50: 'rgb(var(--hivis-50) / <alpha-value>)', 100: 'rgb(var(--hivis-100) / <alpha-value>)', 300: 'rgb(var(--hivis-300) / <alpha-value>)', 400: 'rgb(var(--hivis-400) / <alpha-value>)', 500: 'rgb(var(--hivis-500) / <alpha-value>)', 600: 'rgb(var(--hivis-600) / <alpha-value>)', 700: 'rgb(var(--hivis-700) / <alpha-value>)' },
       },
       boxShadow: { card: '0 1px 0 rgba(17,20,25,0.04), 0 1px 3px rgba(17,20,25,0.08)' },
     },

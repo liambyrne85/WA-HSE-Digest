@@ -1,6 +1,6 @@
 import {
   ArrowDown, ArrowLeft, ArrowUp, CheckSquare, ChevronDown, ChevronRight, Copy, Eye, Hash, History, Image, List,
-  PenLine, Plus, Rocket, Save, ToggleLeft, Trash2, Type,
+  PenLine, Plus, Rocket, Save, Table2, ToggleLeft, Trash2, Type,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useBlocker, useParams } from 'react-router-dom';
@@ -11,16 +11,54 @@ import {
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { api } from '../../lib/api';
-import { QUESTION_TYPE, TEMPLATE_CATEGORY, TEMPLATE_STATUS, formatDate } from '../../lib/labels';
-import type { FormTemplate, FormTemplateVersion, LookupList, Question, QuestionType, Section, TemplateCategory, TemplateSchema } from '../../lib/types';
+import { MODULE_FIELDS, QUESTION_TYPE, TEMPLATE_CATEGORY, TEMPLATE_STATUS, formatDate } from '../../lib/labels';
+import type { FormTemplate, FormTemplateVersion, LookupList, PipelineStatus, Question, QuestionType, Section, TableColumn, TemplateCategory, TemplateSchema, WorkflowModule, WorkflowPipeline } from '../../lib/types';
 import { errMsg } from '../../lib/useAsync';
 import { useIsDesktop } from '../../lib/useMediaQuery';
 
 const rid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 8)}`;
 
 const TYPE_ICON: Record<QuestionType, typeof Type> = {
-  pass_fail_na: CheckSquare, yes_no: ToggleLeft, text: Type, number: Hash, dropdown: List, photo: Image, signature: PenLine,
+  pass_fail_na: CheckSquare, yes_no: ToggleLeft, text: Type, number: Hash, dropdown: List, photo: Image, signature: PenLine, table: Table2,
 };
+
+const DEFAULT_COLUMNS: TableColumn[] = [
+  { id: 'name', label: 'Name', type: 'text' },
+  { id: 'hours', label: 'Hours', type: 'number' },
+];
+const colId = (label: string, taken: string[]) => {
+  const base = label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'col';
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base}_${n}`;
+  return id;
+};
+
+function ColumnsEditor({ columns, onChange }: { columns: TableColumn[]; onChange: (c: TableColumn[]) => void }) {
+  return (
+    <div>
+      <span className="label">Columns</span>
+      <div className="space-y-2">
+        {columns.map((c, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Input aria-label="Column label" value={c.label} className="!py-2"
+              onChange={(e) => onChange(columns.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+            <Select aria-label="Column type" className="!w-32 !py-2" value={c.type}
+              onChange={(e) => onChange(columns.map((x, j) => (j === i ? { ...x, type: e.target.value as TableColumn['type'] } : x)))}>
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+            </Select>
+            <code className="hidden w-24 truncate text-xs text-steel-500 sm:block" title="Stored as">{c.id}</code>
+            <button type="button" aria-label="Remove column" disabled={columns.length <= 1} onClick={() => onChange(columns.filter((_, j) => j !== i))}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-30"><Trash2 className="h-4 w-4" /></button>
+          </div>
+        ))}
+      </div>
+      <Button className="mt-2" size="sm" variant="secondary" icon={<Plus className="h-4 w-4" />}
+        onClick={() => onChange([...columns, { id: colId('Column', columns.map((c) => c.id)), label: 'Column', type: 'text' }])}>Add column</Button>
+      <p className="mt-2 text-xs text-steel-500">A number column stored as <code>hours</code> is added up into <b>Total hours</b>, which workflow rules can test.</p>
+    </div>
+  );
+}
 
 function move<T>(arr: T[], i: number, d: -1 | 1) {
   const j = i + d;
@@ -31,8 +69,8 @@ function move<T>(arr: T[], i: number, d: -1 | 1) {
 }
 
 // ---------------------------------------------------------------------------
-function QuestionEditor({ q, index, count, lists, onChange, onMove, onDuplicate, onDelete }: {
-  q: Question; index: number; count: number; lists: LookupList[];
+function QuestionEditor({ q, index, count, lists, fieldOptions, onChange, onMove, onDuplicate, onDelete }: {
+  q: Question; index: number; count: number; lists: LookupList[]; fieldOptions: { key: string; label: string }[];
   onChange: (q: Question) => void; onMove: (d: -1 | 1) => void; onDuplicate: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(!q.label);
@@ -41,6 +79,7 @@ function QuestionEditor({ q, index, count, lists, onChange, onMove, onDuplicate,
   const changeType = (t: QuestionType) => {
     const next: Question = { id: q.id, label: q.label, type: t, required: q.required, helpText: q.helpText };
     if (t === 'dropdown') next.options = q.options?.length ? q.options : ['Option 1', 'Option 2'];
+    if (t === 'table') next.columns = q.columns?.length ? q.columns : DEFAULT_COLUMNS;
     onChange(next);
   };
 
@@ -98,6 +137,14 @@ function QuestionEditor({ q, index, count, lists, onChange, onMove, onDuplicate,
             </div>
           )}
           {q.type === 'text' && <Checkbox label="Multi-line answer" checked={!!q.multiline} onChange={(v) => set('multiline', v || undefined)} />}
+          {q.type === 'table' && <ColumnsEditor columns={q.columns ?? DEFAULT_COLUMNS} onChange={(c) => set('columns', c)} />}
+          {!['photo', 'signature', 'table'].includes(q.type) && (
+            <Field label="Rule field name (optional)" hint={q.lookupKey ? 'Dropdowns linked to a list already feed their field (e.g. Severity). Set a name here to override.' : 'Lets workflow rules test this answer by name, e.g. residual_risk or score.'}>
+              <Input list={`fields-${q.id}`} value={q.fieldKey ?? ''} placeholder="e.g. residual_risk"
+                onChange={(e) => set('fieldKey', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') || undefined)} />
+              <datalist id={`fields-${q.id}`}>{fieldOptions.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}</datalist>
+            </Field>
+          )}
           {(q.type === 'pass_fail_na' || q.type === 'yes_no') && (
             <>
               <Checkbox label={`Require a photo when answered ${q.type === 'yes_no' ? '“No”' : '“Fail”'}`} checked={!!q.photoOnFail} onChange={(v) => set('photoOnFail', v || undefined)} />
@@ -140,8 +187,8 @@ function AddQuestionMenu({ onAdd }: { onAdd: (t: QuestionType) => void }) {
   );
 }
 
-function SectionEditor({ s, index, count, lists, onChange, onMove, onDelete }: {
-  s: Section; index: number; count: number; lists: LookupList[];
+function SectionEditor({ s, index, count, lists, fieldOptions, onChange, onMove, onDelete }: {
+  s: Section; index: number; count: number; lists: LookupList[]; fieldOptions: { key: string; label: string }[];
   onChange: (s: Section) => void; onMove: (d: -1 | 1) => void; onDelete: () => void;
 }) {
   const setQ = (qs: Question[]) => onChange({ ...s, questions: qs });
@@ -163,7 +210,7 @@ function SectionEditor({ s, index, count, lists, onChange, onMove, onDelete }: {
       </header>
       <div className="space-y-3 p-3">
         {s.questions.map((q, i) => (
-          <QuestionEditor key={q.id} q={q} index={i} count={s.questions.length} lists={lists}
+          <QuestionEditor key={q.id} q={q} index={i} count={s.questions.length} lists={lists} fieldOptions={fieldOptions}
             onChange={(nq) => setQ(s.questions.map((x) => (x.id === q.id ? nq : x)))}
             onMove={(d) => setQ(move(s.questions, i, d))}
             onDuplicate={() => { const c = [...s.questions]; c.splice(i + 1, 0, { ...structuredClone(q), id: rid('q'), label: `${q.label} (copy)` }); setQ(c); }}
@@ -171,6 +218,7 @@ function SectionEditor({ s, index, count, lists, onChange, onMove, onDelete }: {
         ))}
         <AddQuestionMenu onAdd={(t) => setQ([...s.questions, {
           id: rid('q'), label: '', type: t, required: true, ...(t === 'dropdown' ? { options: ['Option 1', 'Option 2'] } : {}),
+          ...(t === 'table' ? { columns: DEFAULT_COLUMNS } : {}),
         }])} />
       </div>
     </section>
@@ -223,6 +271,7 @@ export default function TemplateBuilderPage() {
   const [meta, setMeta] = useState({ name: '', description: '', category: 'audit' as TemplateCategory, available_to_contractors: true });
   const [versions, setVersions] = useState<FormTemplateVersion[]>([]);
   const [lists, setLists] = useState<LookupList[]>([]);
+  const [pipelines, setPipelines] = useState<WorkflowPipeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -239,7 +288,8 @@ export default function TemplateBuilderPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [t, v, l] = await Promise.all([api.getTemplate(id!), api.listTemplateVersions(id!), api.listLookupLists()]);
+      const [t, v, l, pl] = await Promise.all([api.getTemplate(id!), api.listTemplateVersions(id!), api.listLookupLists(), api.listPipelines()]);
+      setPipelines(pl);
       if (!t) throw new Error('Template not found');
       setTpl(t);
       setSchema(structuredClone(t.draft_schema));
@@ -289,6 +339,7 @@ export default function TemplateBuilderPage() {
       for (const q of s.questions) {
         if (!q.label.trim()) return `A question in "${s.title}" has no text`;
         if (q.type === 'dropdown' && !q.lookupKey && !(q.options ?? []).filter((o) => o.trim()).length) return `Dropdown "${q.label}" needs options`;
+        if (q.type === 'table' && (!q.columns?.length || q.columns.some((c) => !c.label.trim()))) return `Table "${q.label}" needs named columns`;
       }
     }
     return null;
@@ -339,6 +390,9 @@ export default function TemplateBuilderPage() {
   const questionCount = schema.sections.reduce((n, s) => n + s.questions.length, 0);
   const unpublished = dirty || tpl.has_unpublished_changes;
 
+  const moduleStatuses: PipelineStatus[] = pipelines.find((p) => p.module === (meta.category as WorkflowModule))?.statuses.filter((st) => st.key !== 'draft') ?? [];
+  const fieldOptions = MODULE_FIELDS[meta.category as WorkflowModule] ?? [];
+
   const editor = (
     <div className="space-y-4">
       <div className="card space-y-4 p-4">
@@ -364,10 +418,19 @@ export default function TemplateBuilderPage() {
           <Checkbox label="Requires supervisor sign-off" checked={!!schema.settings?.requireSignOff}
             onChange={(v) => updateSchema({ ...schema, settings: { ...schema.settings, requireSignOff: v } })} />
         </div>
+        {moduleStatuses.length > 0 && (
+          <Field label="When a critical item fails on submit, set status to" hint="Mark questions as Critical in their settings. Leave as default to use the normal submitted status (or Defect Reported if the pipeline has it).">
+            <Select value={schema.settings?.criticalFailStatus ?? ''}
+              onChange={(e) => updateSchema({ ...schema, settings: { ...schema.settings, criticalFailStatus: e.target.value || undefined } })}>
+              <option value="">Default</option>
+              {moduleStatuses.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+            </Select>
+          </Field>
+        )}
       </div>
 
       {schema.sections.map((s, i) => (
-        <SectionEditor key={s.id} s={s} index={i} count={schema.sections.length} lists={lists}
+        <SectionEditor key={s.id} s={s} index={i} count={schema.sections.length} lists={lists} fieldOptions={fieldOptions}
           onChange={(ns) => setSections(schema.sections.map((x) => (x.id === s.id ? ns : x)))}
           onMove={(d) => setSections(move(schema.sections, i, d))}
           onDelete={async () => {

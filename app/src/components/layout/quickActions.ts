@@ -1,4 +1,4 @@
-import { ClipboardCheck, FileText, GraduationCap, LayoutTemplate, ShieldAlert, Truck, UserPlus, Users, type LucideIcon } from 'lucide-react';
+import { CheckSquare, ClipboardCheck, Clock, FileText, GraduationCap, LayoutTemplate, ShieldAlert, ShieldCheck, Truck, UserPlus, Users, type LucideIcon } from 'lucide-react';
 import type { AppRole } from '../../lib/types';
 
 export interface QuickAction {
@@ -16,15 +16,18 @@ const TRAINING: QuickAction = { label: 'My Training', description: 'Tickets, lic
 const CREW: QuickAction = { label: 'Crew Tickets', description: "Manage your crew's tickets", to: '/training', icon: Users, className: 'bg-emerald-700 text-white hover:bg-emerald-800' };
 const INVITE: QuickAction = { label: 'Invite User', description: 'Employee, leader or contractor', to: '/admin/users?invite=1', icon: UserPlus, className: 'bg-steel-900 text-white hover:bg-steel-800' };
 const TEMPLATE: QuickAction = { label: 'New Template', description: 'Checklist or form', to: '/admin/templates?new=1', icon: LayoutTemplate, className: 'bg-brand-800 text-white hover:bg-brand-900' };
+const TIMESHEET: QuickAction = { label: 'Timesheet', description: 'Hours for the week', to: '/timesheets?new=1', icon: Clock, className: 'bg-brand-700 text-white hover:bg-brand-800' };
+const TAKE5: QuickAction = { label: 'Take 5', description: 'Step-back risk check', to: '/risk?new=1', icon: ShieldCheck, className: 'bg-violet-700 text-white hover:bg-violet-800' };
+const APPROVALS: QuickAction = { label: 'Approvals', description: 'Waiting for your decision', to: '/approvals', icon: CheckSquare, className: 'bg-steel-700 text-white hover:bg-steel-800' };
 const AUDIT: QuickAction = { label: 'Start Audit', description: 'Site inspection', to: '/audits?new=1', icon: ClipboardCheck, className: 'bg-steel-700 text-white hover:bg-steel-800' };
 
 export function quickActionsFor(role: AppRole): QuickAction[] {
   switch (role) {
     case 'leader':
-      return [LOG_EVENT, NEW_DFR, PRESTART, TRAINING, INVITE, TEMPLATE];
+      return [LOG_EVENT, APPROVALS, NEW_DFR, AUDIT, INVITE, TEMPLATE];
     case 'employee':
-      return [LOG_EVENT, NEW_DFR, PRESTART, TRAINING, AUDIT];
+      return [LOG_EVENT, NEW_DFR, PRESTART, TAKE5, TIMESHEET, TRAINING];
     case 'contractor':
-      return [LOG_EVENT, NEW_DFR, PRESTART, CREW];
+      return [LOG_EVENT, NEW_DFR, PRESTART, TAKE5, TIMESHEET, CREW];
   }
 }

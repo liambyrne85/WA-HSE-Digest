@@ -3,6 +3,38 @@
 @tailwind utilities;
 
 @layer base {
+  /* Default brand palette; replaced at runtime from Branding settings (see src/lib/theme.ts). */
+  :root {
+    --brand-50: 237 240 250;
+    --brand-100: 222 227 246;
+    --brand-200: 188 200 238;
+    --brand-300: 144 163 227;
+    --brand-400: 88 117 212;
+    --brand-500: 32 71 198;
+    --brand-600: 27 60 168;
+    --brand-700: 22 50 139;
+    --brand-800: 19 41 115;
+    --brand-900: 15 34 95;
+    --steel-50: 247 247 248;
+    --steel-100: 238 239 242;
+    --steel-200: 222 224 228;
+    --steel-300: 189 193 201;
+    --steel-400: 149 155 169;
+    --steel-500: 118 126 144;
+    --steel-600: 90 100 121;
+    --steel-700: 61 73 98;
+    --steel-800: 38 51 78;
+    --steel-900: 19 33 63;
+    --steel-950: 12 21 41;
+    --hivis-50: 254 249 237;
+    --hivis-100: 253 241 209;
+    --hivis-300: 249 212 118;
+    --hivis-400: 247 198 72;
+    --hivis-500: 245 184 26;
+    --hivis-600: 216 162 23;
+    --hivis-700: 172 129 18;
+
+  }
   html { -webkit-tap-highlight-color: transparent; }
   body { @apply min-h-screen; }
   h1, h2, h3 { @apply font-display tracking-wide; }

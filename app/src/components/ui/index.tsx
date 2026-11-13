@@ -68,10 +68,27 @@ const dotColors: Record<BadgeColor, string> = {
   green: 'bg-emerald-500', red: 'bg-red-500', purple: 'bg-violet-500',
 };
 
-export function Badge({ color = 'slate', children, dot = true, className }: { color?: BadgeColor; children: ReactNode; dot?: boolean; className?: string }) {
+/** Darken a #rrggbb colour (0..1) — used for readable text on custom-colour badges. */
+function shade(hex: string, amount: number) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c: number) => Math.round(c * (1 - amount)).toString(16).padStart(2, '0');
+  return `#${f((n >> 16) & 255)}${f((n >> 8) & 255)}${f(n & 255)}`;
+}
+
+export function Badge({ color = 'slate', children, dot = true, className }: { color?: BadgeColor | string; children: ReactNode; dot?: boolean; className?: string }) {
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    return (
+      <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ring-inset', className)}
+        style={{ backgroundColor: `${color}1f`, color: shade(color, 0.45), boxShadow: `inset 0 0 0 1px ${color}80` }}>
+        {dot && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />}
+        {children}
+      </span>
+    );
+  }
+  const c = (color in badgeColors ? color : 'slate') as BadgeColor;
   return (
-    <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ring-inset', badgeColors[color], className)}>
-      {dot && <span className={clsx('h-1.5 w-1.5 rounded-full', dotColors[color])} />}
+    <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ring-inset', badgeColors[c], className)}>
+      {dot && <span className={clsx('h-1.5 w-1.5 rounded-full', dotColors[c])} />}
       {children}
     </span>
   );

@@ -4,6 +4,7 @@ import { createBrowserRouter, createMemoryRouter, RouterProvider } from 'react-r
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { ConfirmProvider } from './contexts/ConfirmContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import './index.css';
 
@@ -14,13 +15,15 @@ const router = createRouter([
   {
     path: '*',
     element: (
-      <AuthProvider>
-        <ToastProvider>
-          <ConfirmProvider>
-            <App />
-          </ConfirmProvider>
-        </ToastProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <ConfirmProvider>
+              <App />
+            </ConfirmProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
     ),
   },
 ], { basename: import.meta.env.VITE_MEMORY_ROUTER === '1' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });

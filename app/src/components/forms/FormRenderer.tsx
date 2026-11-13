@@ -1,8 +1,8 @@
 import { clsx } from 'clsx';
-import { AlertTriangle, Camera, Eraser, ImagePlus, X } from 'lucide-react';
+import { AlertTriangle, Camera, Eraser, ImagePlus, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api';
-import type { LookupValue, Question, TemplateSchema } from '../../lib/types';
+import type { LookupValue, Question, TableColumn, TemplateSchema } from '../../lib/types';
 import { Button, Input, Select, Textarea } from '../ui';
 
 export type Answers = Record<string, unknown>;
@@ -159,6 +159,46 @@ const YN = [
   { v: 'no', label: 'No', tone: 'border-red-600 bg-red-600 text-white' },
 ];
 
+// ---------------------------------------------------------------------------
+// Table (repeating rows): crew, plant, timesheet lines
+// ---------------------------------------------------------------------------
+type Row = Record<string, string>;
+function TableInput({ columns, value, onChange }: { columns: TableColumn[]; value?: Row[]; onChange: (v: Row[]) => void }) {
+  const rows = value ?? [];
+  const setCell = (i: number, col: string, v: string) => onChange(rows.map((r, j) => (j === i ? { ...r, [col]: v } : r)));
+  const totals = columns.filter((c) => c.type === 'number').map((c) => ({
+    c, sum: rows.reduce((n, r) => n + (Number(r[c.id]) || 0), 0),
+  }));
+  if (!columns.length) return <p className="text-sm text-steel-400">No columns set up for this table.</p>;
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <div key={i} className="flex items-end gap-2 rounded-lg border-2 border-steel-200 bg-steel-50 p-2">
+          <div className="grid flex-1 gap-2" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${columns.length > 2 ? 110 : 140}px, 1fr))` }}>
+            {columns.map((c) => (
+              <label key={c.id} className="block min-w-0">
+                <span className="mb-0.5 block text-[11px] font-bold uppercase tracking-wide text-steel-500">{c.label}</span>
+                <Input value={r[c.id] ?? ''} inputMode={c.type === 'number' ? 'decimal' : undefined} type={c.type === 'number' ? 'number' : 'text'}
+                  onChange={(e) => setCell(i, c.id, e.target.value)} className="!py-2" />
+              </label>
+            ))}
+          </div>
+          <button type="button" aria-label={`Remove row ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-600 hover:bg-red-50">
+            <Trash2 className="h-5 w-5" />
+          </button>
+        </div>
+      ))}
+      <Button variant="secondary" block icon={<Plus className="h-5 w-5" />} onClick={() => onChange([...rows, {}])}>Add row</Button>
+      {rows.length > 0 && totals.length > 0 && (
+        <p className="text-right text-sm font-semibold text-steel-700">
+          {totals.map((t) => `Total ${t.c.label.toLowerCase()}: ${Math.round(t.sum * 100) / 100}`).join(' · ')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function isNegative(q: Question, v: unknown) {
   return (q.type === 'pass_fail_na' && v === 'fail') || (q.type === 'yes_no' && v === 'no');
 }
@@ -168,7 +208,9 @@ export function validateAnswers(schema: TemplateSchema, answers: Answers) {
   for (const s of schema.sections) {
     for (const q of s.questions) {
       const v = answers[q.id];
-      const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+      const filledRows = q.type === 'table' && Array.isArray(v)
+        ? (v as Row[]).filter((r) => Object.values(r ?? {}).some((x) => String(x ?? '').trim() !== '')) : null;
+      const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0) || (filledRows !== null && filledRows.length === 0);
       if (q.required && empty) errors[q.id] = 'Required';
       if (q.type === 'number' && !empty) {
         const n = Number(v);
@@ -235,6 +277,7 @@ export function QuestionInput({ q, answers, setAnswer, errors }: { q: Question; 
       )}
       {q.type === 'photo' && <PhotoInput value={v as string[]} onChange={(x) => setAnswer(q.id, x)} required={q.required} />}
       {q.type === 'signature' && <SignaturePad value={v as string} onChange={(x) => setAnswer(q.id, x)} />}
+      {q.type === 'table' && <TableInput columns={q.columns ?? []} value={v as Row[]} onChange={(x) => setAnswer(q.id, x)} />}
 
       {q.photoOnFail && isNegative(q, v) && (
         <div className="mt-3 rounded-lg bg-red-50 p-3">
@@ -251,8 +294,18 @@ export function QuestionInput({ q, answers, setAnswer, errors }: { q: Question; 
 }
 
 /** Renders a template schema as a fillable, validated form. */
-export function FormRenderer({ schema, onSubmit, submitLabel = 'Submit' }: { schema: TemplateSchema; onSubmit?: (answers: Answers) => void; submitLabel?: string }) {
-  const [answers, setAnswers] = useState<Answers>({});
+export function FormRenderer({ schema, onSubmit, onSaveDraft, submitLabel = 'Submit', initialAnswers, busy, header }: {
+  schema: TemplateSchema;
+  onSubmit?: (answers: Answers) => void;
+  /** when given, shows a "Save draft" button that skips validation */
+  onSaveDraft?: (answers: Answers) => void;
+  submitLabel?: string;
+  initialAnswers?: Answers;
+  busy?: boolean;
+  /** rendered above the first section (e.g. project picker) */
+  header?: React.ReactNode;
+}) {
+  const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const setAnswer = (id: string, v: unknown) => {
@@ -262,7 +315,7 @@ export function FormRenderer({ schema, onSubmit, submitLabel = 'Submit' }: { sch
   const total = schema.sections.reduce((n, s) => n + s.questions.length, 0);
   const answered = schema.sections.flatMap((s) => s.questions).filter((q) => {
     const v = answers[q.id];
-    return !(v === undefined || v === '' || (Array.isArray(v) && !v.length));
+    return !(v === undefined || v === '' || v === null || (Array.isArray(v) && !v.length));
   }).length;
   const criticalFails = schema.sections.flatMap((s) => s.questions).filter((q) => q.critical && isNegative(q, answers[q.id]));
 
@@ -291,6 +344,7 @@ export function FormRenderer({ schema, onSubmit, submitLabel = 'Submit' }: { sch
           <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${total ? (answered / total) * 100 : 0}%` }} />
         </div>
       </div>
+      {header}
       {schema.sections.map((s, i) => (
         <fieldset key={s.id} className="space-y-3">
           <legend className="mb-2 flex items-center gap-2">
@@ -307,7 +361,12 @@ export function FormRenderer({ schema, onSubmit, submitLabel = 'Submit' }: { sch
           {Object.keys(errors).length} item{Object.keys(errors).length > 1 ? 's need' : ' needs'} attention.
         </p>
       )}
-      <Button type="submit" size="lg" block>{submitLabel}</Button>
+      <div className="flex flex-col gap-2 sm:flex-row-reverse">
+        <Button type="submit" size="lg" block loading={busy}>{submitLabel}</Button>
+        {onSaveDraft && (
+          <Button type="button" size="lg" variant="secondary" block disabled={busy} onClick={() => onSaveDraft(answers)}>Save draft</Button>
+        )}
+      </div>
     </form>
   );
 }

@@ -6,7 +6,11 @@ import type { AppRole } from './lib/types';
 import CrewPage from './pages/CrewPage';
 import DashboardPage from './pages/DashboardPage';
 import LoginPage from './pages/LoginPage';
-import ModulePlaceholderPage from './pages/ModulePlaceholderPage';
+import ApprovalsPage from './pages/ApprovalsPage';
+import ModulePage from './pages/ModulePage';
+import RecordDetailPage from './pages/RecordDetailPage';
+import RecordFormPage from './pages/RecordFormPage';
+import BrandingPage from './pages/admin/BrandingPage';
 import NotFoundPage from './pages/NotFoundPage';
 import PendingAccessPage from './pages/PendingAccessPage';
 import ProfilePage, { PasswordCard } from './pages/ProfilePage';
@@ -52,10 +56,17 @@ export default function App() {
         <Route path="/training" element={<TrainingPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/crew" element={<RequireRole roles={['contractor']}><CrewPage /></RequireRole>} />
-        <Route path="/safety" element={<ModulePlaceholderPage module="safety_event" />} />
-        <Route path="/dfr" element={<ModulePlaceholderPage module="daily_field_report" />} />
-        <Route path="/prestart" element={<ModulePlaceholderPage module="plant_prestart" />} />
-        <Route path="/audits" element={<RequireRole roles={['leader', 'employee']}><ModulePlaceholderPage module="audit" /></RequireRole>} />
+        <Route path="/safety" element={<ModulePage key="safety_event" module="safety_event" />} />
+        <Route path="/dfr" element={<ModulePage key="daily_field_report" module="daily_field_report" />} />
+        <Route path="/timesheets" element={<ModulePage key="timesheet" module="timesheet" />} />
+        <Route path="/prestart" element={<ModulePage key="plant_prestart" module="plant_prestart" />} />
+        <Route path="/risk" element={<ModulePage key="risk_assessment" module="risk_assessment" />} />
+        <Route path="/audits" element={<RequireRole roles={['leader', 'employee']}><ModulePage key="audit" module="audit" /></RequireRole>} />
+        <Route path="/records/new" element={<RecordFormPage />} />
+        <Route path="/records/:id" element={<RecordDetailPage />} />
+        <Route path="/records/:id/edit" element={<RecordFormPage />} />
+        <Route path="/approvals" element={<ApprovalsPage />} />
+        <Route path="/admin/branding" element={<RequireRole roles={['leader']}><BrandingPage /></RequireRole>} />
         <Route path="/admin/users" element={<RequireRole roles={['leader']}><UsersPage /></RequireRole>} />
         <Route path="/admin/templates" element={<RequireRole roles={['leader']}><TemplatesPage /></RequireRole>} />
         <Route path="/admin/templates/:id" element={<RequireRole roles={['leader']}><TemplateBuilderPage /></RequireRole>} />

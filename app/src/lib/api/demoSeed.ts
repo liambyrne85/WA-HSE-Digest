@@ -1,5 +1,5 @@
 import type {
-  FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
+  AppSettings, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, TemplateSchema, WorkerTicket, WorkflowPipeline, WorkflowRule,
 } from '../types';
 
@@ -18,6 +18,11 @@ export interface DemoDb {
   rules: WorkflowRule[];
   tickets: WorkerTicket[];
   notifications: (Notification & { user_id: string })[];
+  records: RecordRow[];
+  approvals: RecordApproval[];
+  events: RecordEvent[];
+  counters: Partial<Record<WorkflowModule, number>>;
+  settings: AppSettings;
 }
 
 const now = new Date().toISOString();
@@ -56,7 +61,7 @@ export const STARTER_TEMPLATES: { name: string; description: string; category: F
       settings: { requireProject: true, requireSignOff: true },
       sections: [
         { id: 's-details', title: 'Plant Details', questions: [
-          { id: 'q-plant', label: 'Plant category', type: 'dropdown', required: true, options: ['Excavator', 'Wheel Loader', 'Dozer', 'Grader', 'Roller / Compactor'] },
+          { id: 'q-plant', label: 'Plant category', type: 'dropdown', required: true, lookupKey: 'plant_categories' },
           { id: 'q-fleet', label: 'Fleet / asset number', type: 'text', required: true },
           { id: 'q-hours', label: 'Hour meter reading', type: 'number', required: true, unit: 'hrs' },
         ] },
@@ -146,6 +151,60 @@ export const STARTER_TEMPLATES: { name: string; description: string; category: F
     },
   },
 ];
+
+STARTER_TEMPLATES.push(
+  {
+    name: 'Daily Field Report',
+    description: 'Shift report: crew, hours, plant, progress and issues.',
+    category: 'daily_field_report',
+    schema: {
+      settings: { requireProject: true, requireSignOff: true },
+      sections: [
+        { id: 's-shift', title: 'Shift', questions: [
+          { id: 'q-shift', label: 'Shift', type: 'dropdown', required: true, options: ['Day', 'Night'] },
+          { id: 'q-weather', label: 'Weather', type: 'dropdown', required: true, options: ['Fine', 'Hot (over 35°C)', 'Wet', 'Windy', 'Storm / lightning'] },
+        ] },
+        { id: 's-crew', title: 'Crew & Hours', questions: [
+          { id: 'q-crew', label: 'Crew on site', type: 'table', required: true, columns: [
+            { id: 'name', label: 'Name', type: 'text' }, { id: 'role', label: 'Role', type: 'text' }, { id: 'hours', label: 'Hours', type: 'number' }] },
+        ] },
+        { id: 's-plant', title: 'Plant & Equipment', questions: [
+          { id: 'q-plant', label: 'Plant used', type: 'table', required: false, columns: [
+            { id: 'plant', label: 'Plant / fleet no.', type: 'text' }, { id: 'plant_hours', label: 'Hours', type: 'number' }] },
+        ] },
+        { id: 's-progress', title: 'Progress', questions: [
+          { id: 'q-work', label: 'Work completed', type: 'text', required: true, multiline: true },
+          { id: 'q-delays', label: 'Delays or issues', type: 'text', required: false, multiline: true },
+          { id: 'q-photos', label: 'Progress photos', type: 'photo', required: false },
+        ] },
+        { id: 's-sign', title: 'Safety & Sign-off', questions: [
+          { id: 'q-incidents', label: 'Were there any incidents or near misses this shift?', type: 'yes_no', required: true, helpText: 'If yes, also log a Safety Event.' },
+          { id: 'q-sig', label: 'Supervisor signature', type: 'signature', required: true },
+        ] },
+      ],
+    },
+  },
+  {
+    name: 'Weekly Timesheet',
+    description: 'Hours worked by each person for the week.',
+    category: 'timesheet',
+    schema: {
+      settings: { requireProject: true, requireSignOff: true },
+      sections: [
+        { id: 's-week', title: 'Week', questions: [
+          { id: 'q-week', label: 'Week ending', type: 'text', required: true, helpText: 'e.g. Sunday 15 November' },
+        ] },
+        { id: 's-hours', title: 'Hours', questions: [
+          { id: 'q-hours', label: 'Hours worked', type: 'table', required: true, columns: [
+            { id: 'name', label: 'Worker', type: 'text' }, { id: 'day', label: 'Day', type: 'text' }, { id: 'hours', label: 'Hours', type: 'number' }] },
+        ] },
+        { id: 's-sign', title: 'Sign-off', questions: [
+          { id: 'q-sig', label: 'Supervisor signature', type: 'signature', required: true },
+        ] },
+      ],
+    },
+  },
+);
 
 export function buildDemoSeed(): DemoDb {
   const jobRoles = [
@@ -271,6 +330,7 @@ export function buildDemoSeed(): DemoDb {
       { id: 'rule-1', name: 'High severity safety event alert', description: 'Escalate any High or Critical event to leaders immediately.', module: 'safety_event', trigger_event: 'field_condition', trigger_config: { field: 'severity', operator: 'in', value: 'High,Critical' }, approval_chain: [{ step: 1, role: 'leader', sla_hours: 4 }], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'High severity safety event logged' }, { type: 'email', recipients: ['role:leader'], message: 'A High/Critical safety event requires review within 4 hours.' }], is_enabled: true, priority: 10, updated_at: now },
       { id: 'rule-2', name: 'DFR submitted for approval', description: 'Daily Field Reports need leader approval once submitted.', module: 'daily_field_report', trigger_event: 'status_changed', trigger_config: { to_status: 'submitted' }, approval_chain: [{ step: 1, role: 'leader', sla_hours: 24 }], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'A Daily Field Report is awaiting approval' }], is_enabled: true, priority: 50, updated_at: now },
       { id: 'rule-3', name: 'Plant defect reported', description: 'Notify leaders when a pre-start records a defect.', module: 'plant_prestart', trigger_event: 'status_changed', trigger_config: { to_status: 'defect_reported' }, approval_chain: [], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'Plant defect reported on pre-start — tag out until cleared' }, { type: 'email', recipients: ['role:leader'] }], is_enabled: true, priority: 20, updated_at: now },
+      { id: 'rule-5', name: 'Timesheet submitted for approval', description: 'Leaders approve submitted timesheets before payroll.', module: 'timesheet', trigger_event: 'status_changed', trigger_config: { to_status: 'submitted' }, approval_chain: [{ step: 1, role: 'leader', sla_hours: 48 }], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'A timesheet is awaiting approval' }], is_enabled: true, priority: 50, updated_at: now },
       { id: 'rule-4', name: 'Ticket expiring in 30 days', description: 'Remind the worker (and leaders) before a licence or ticket expires.', module: 'training', trigger_event: 'ticket_expiring', trigger_config: { days_before: 30 }, approval_chain: [], actions: [{ type: 'in_app', recipients: ['submitter', 'role:leader'], message: 'A ticket or licence expires within 30 days' }], is_enabled: false, priority: 100, updated_at: now },
     ],
     tickets: [
@@ -287,5 +347,10 @@ export function buildDemoSeed(): DemoDb {
       { id: 'n-2', user_id: 'u-emp', title: 'Ticket expiring soon', body: 'Your First Aid (HLTAID011) expires in 18 days.', link: '/training', read_at: null, created_at: now },
       { id: 'n-3', user_id: 'u-acme1', title: 'Crew ticket expired', body: 'Ravi Patel – Working at Heights has expired.', link: '/crew', read_at: null, created_at: now },
     ],
+    records: [],
+    approvals: [],
+    events: [],
+    counters: {},
+    settings: { company_name: 'Access & Site Services', primary_color: '#2047c6', accent_color: '#f5b81a', dark_color: '#13213f', logo_url: null },
   };
 }
