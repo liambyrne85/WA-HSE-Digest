@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import { PROJECT_STATUS, daysUntil, formatDate, ticketState } from '../lib/labels';
 import { useAsync } from '../lib/useAsync';
+import { StatusBadge } from './ModulePage';
 
 function greeting() {
   const h = new Date().getHours();
@@ -20,7 +21,7 @@ export default function DashboardPage() {
   const { profile, role, isLeader, isContractor } = useAuth();
 
   const { data } = useAsync(async () => {
-    const [projects, tickets, profiles, templates, rules, invitations, orgs] = await Promise.all([
+    const [projects, tickets, profiles, templates, rules, invitations, orgs, records, approvals, pipelines] = await Promise.all([
       api.listProjects(),
       api.listTickets(),
       api.listProfiles(),
@@ -28,8 +29,11 @@ export default function DashboardPage() {
       api.listRules(),
       api.listInvitations(),
       api.listOrganizations(),
+      api.listRecords(),
+      api.listMyPendingApprovals(),
+      api.listPipelines(),
     ]);
-    return { projects, tickets, profiles, templates, rules, invitations, orgs };
+    return { projects, tickets, profiles, templates, rules, invitations, orgs, records, approvals, pipelines };
   }, []);
 
   const activeProjects = data?.projects.filter((p) => p.is_active && p.status === 'active') ?? [];
@@ -39,20 +43,27 @@ export default function DashboardPage() {
   const myOrg = data?.orgs.find((o) => o.id === profile?.organization_id);
   const actions = quickActionsFor(role!);
   const nameOf = (id: string) => data?.profiles.find((p) => p.id === id)?.full_name ?? 'You';
+  const terminal = (m: string, st: string) => !!data?.pipelines.find((p) => p.module === m)?.statuses.find((s) => s.key === st)?.is_terminal;
+  const records = data?.records ?? [];
+  const open = (m?: string) => records.filter((r) => (!m || r.module === m) && r.status !== 'draft' && !terminal(r.module, r.status));
+  const today = new Date().toDateString();
+  const weekAgo = Date.now() - 7 * 864e5;
+  const mine = records.filter((r) => r.submitted_by === profile?.id);
+  const statusesFor = (m: string) => data?.pipelines.find((p) => p.module === m)?.statuses;
 
   return (
     <div>
       {/* Hero */}
-      <div className="mb-6 overflow-hidden rounded-2xl bg-steel-900 text-white">
+      <div className="mb-6 overflow-hidden rounded-2xl bg-brand-500 text-white">
         <div className="relative px-5 py-6 sm:px-7">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-brand-500/20 blur-2xl" />
-          <p className="text-xs font-bold uppercase tracking-widest text-brand-400">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+          <p className="text-xs font-bold uppercase tracking-widest text-hivis-400">
             {new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
           <h1 className="mt-1 text-3xl font-bold uppercase sm:text-4xl">
             {greeting()}, {profile?.full_name.split(' ')[0]}
           </h1>
-          <p className="mt-1 text-sm text-steel-300">
+          <p className="mt-1 text-sm text-white/85">
             {isLeader && 'Here\'s what needs your attention across all sites and contractors.'}
             {role === 'employee' && 'Log your records, check your tickets and stay safe out there.'}
             {isContractor && <>Signed in for <span className="font-bold text-white">{myOrg?.name}</span> — you only see your own company's data.</>}
@@ -66,11 +77,11 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           {actions.map((a) => (
             <Link key={a.label} to={a.to}
-              className={clsx('group flex min-h-[112px] flex-col justify-between rounded-xl p-4 text-white shadow-card transition-transform active:scale-[0.98]', a.className)}>
+              className={clsx('group flex min-h-[112px] flex-col justify-between rounded-xl p-4 shadow-card transition-transform active:scale-[0.98]', a.className)}>
               <a.icon className="h-8 w-8" />
               <span>
                 <span className="block text-base font-bold leading-tight">{a.label}</span>
-                <span className="mt-0.5 hidden text-xs text-white/75 sm:block">{a.description}</span>
+                <span className="mt-0.5 hidden text-xs opacity-80 sm:block">{a.description}</span>
               </span>
             </Link>
           ))}
@@ -82,8 +93,10 @@ export default function DashboardPage() {
         <h2 id="summary" className="mb-3 text-xl font-bold uppercase text-steel-800">At a glance</h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {isLeader && <>
-            <StatCard label="Open safety events" value="—" tone="red" icon={<ShieldAlert className="h-5 w-5" />} hint="Safety Events module · Phase 2" placeholder />
-            <StatCard label="Pending approvals" value="—" tone="amber" icon={<CheckSquare className="h-5 w-5" />} hint="DFRs, hours & events · Phase 2" placeholder />
+            <StatCard label="Open safety events" value={data ? open('safety_event').length : '–'} tone="red" icon={<ShieldAlert className="h-5 w-5" />}
+              hint={`${open('safety_event').filter((r) => /high|critical/i.test(String(r.summary?.severity ?? ''))).length} high / critical`} />
+            <StatCard label="Waiting for approval" value={data?.approvals.length ?? '–'} tone="amber" icon={<CheckSquare className="h-5 w-5" />}
+              hint={`${data?.approvals.filter((a) => a.due_at && new Date(a.due_at).getTime() < Date.now()).length ?? 0} overdue`} />
             <StatCard label="Active projects" value={activeProjects.length} tone="green" icon={<MapPin className="h-5 w-5" />} hint={`${data?.projects.length ?? 0} in register`} />
             <StatCard label="Tickets expiring ≤30d" value={expiring.length} tone={expiring.length ? 'amber' : 'green'} icon={<GraduationCap className="h-5 w-5" />} hint="Across all workers" />
             <StatCard label="Active users" value={data?.profiles.filter((p) => p.is_active).length ?? '–'} tone="blue" icon={<Users className="h-5 w-5" />}
@@ -94,15 +107,17 @@ export default function DashboardPage() {
             <StatCard label="Active workflow rules" value={data?.rules.filter((r) => r.is_enabled).length ?? '–'} tone="slate" icon={<Workflow className="h-5 w-5" />} hint={`${data?.rules.length ?? 0} configured`} />
           </>}
           {role === 'employee' && <>
-            <StatCard label="My open actions" value="—" tone="amber" icon={<ClipboardList className="h-5 w-5" />} hint="Corrective actions · Phase 2" placeholder />
-            <StatCard label="My pre-starts today" value="—" tone="orange" icon={<Truck className="h-5 w-5" />} hint="Plant module · Phase 2" placeholder />
+            <StatCard label="My open records" value={data ? mine.filter((r) => r.status !== 'draft' && !terminal(r.module, r.status)).length : '–'} tone="amber" icon={<ClipboardList className="h-5 w-5" />}
+              hint={`${mine.filter((r) => r.status === 'draft').length} drafts · ${mine.filter((r) => ['rejected', 'returned'].includes(r.status)).length} returned`} />
+            <StatCard label="My pre-starts today" value={data ? mine.filter((r) => r.module === 'plant_prestart' && new Date(r.created_at).toDateString() === today).length : '–'} tone="orange" icon={<Truck className="h-5 w-5" />} />
             <StatCard label="My tickets" value={myTickets.length} tone="green" icon={<GraduationCap className="h-5 w-5" />} hint={expiring.length ? `${expiring.length} expiring soon` : 'All current'} />
             <StatCard label="Active projects" value={activeProjects.length} tone="blue" icon={<MapPin className="h-5 w-5" />} />
           </>}
           {isContractor && <>
             <StatCard label="Crew members" value={data?.profiles.filter((p) => p.is_active).length ?? '–'} tone="blue" icon={<Users className="h-5 w-5" />} hint={myOrg?.name} />
             <StatCard label="Crew tickets expiring" value={expiring.length} tone={expiring.length ? 'red' : 'green'} icon={<GraduationCap className="h-5 w-5" />} hint="Expired or ≤30 days" />
-            <StatCard label="DFRs this week" value="—" tone="orange" icon={<FileText className="h-5 w-5" />} hint="DFR module · Phase 2" placeholder />
+            <StatCard label="DFRs this week" value={data ? records.filter((r) => r.module === 'daily_field_report' && r.status !== 'draft' && new Date(r.created_at).getTime() > weekAgo).length : '–'} tone="orange" icon={<FileText className="h-5 w-5" />}
+              hint={`${records.filter((r) => ['rejected', 'returned'].includes(r.status)).length} returned for changes`} />
             <StatCard label="Assigned projects" value={activeProjects.length} tone="green" icon={<MapPin className="h-5 w-5" />} />
           </>}
         </div>
@@ -150,6 +165,26 @@ export default function DashboardPage() {
           </ul>
         </Card>
       </div>
+
+      <Card className="mt-5" title={isLeader ? 'Waiting for your approval' : 'My recent records'} padded={false}
+        actions={<Link to={isLeader ? '/approvals' : '/safety'} className="flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">{isLeader ? 'All' : 'Safety events'} <ArrowRight className="h-4 w-4" /></Link>}>
+        <ul className="divide-y divide-steel-100">
+          {(isLeader ? (data?.approvals ?? []).map((a) => a.record) : mine).slice(0, 6).map((r) => (
+            <li key={r.id}>
+              <Link to={`/records/${r.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-steel-50">
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-steel-900"><span className="mr-2 font-mono text-xs text-brand-700">{r.reference}</span>{r.title}</p>
+                  <p className="truncate text-xs text-steel-500">{data?.projects.find((p) => p.id === r.project_id)?.name ?? 'No project'} · {formatDate(r.submitted_at ?? r.created_at)}</p>
+                </div>
+                <StatusBadge status={r.status} statuses={statusesFor(r.module)} />
+              </Link>
+            </li>
+          ))}
+          {data && (isLeader ? data.approvals.length === 0 : mine.length === 0) && (
+            <li className="px-4 py-8 text-center text-sm text-steel-500">{isLeader ? 'Nothing is waiting for you.' : 'Nothing logged yet — use the quick actions above.'}</li>
+          )}
+        </ul>
+      </Card>
 
       {isLeader && data && data.profiles.some((p) => !p.is_active) && (
         <Link to="/admin/users" className="mt-5 flex items-center gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">

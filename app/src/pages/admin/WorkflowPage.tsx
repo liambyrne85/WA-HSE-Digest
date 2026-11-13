@@ -6,11 +6,12 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Badge, Button, Card, Checkbox, EmptyState, ErrorBanner, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle,
 } from '../../components/ui';
+import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { api } from '../../lib/api';
 import { MODULE_FIELDS, MODULE_LABEL, OPERATOR_LABEL, ROLE_LABEL, TRIGGER_LABEL } from '../../lib/labels';
 import type {
-  ActionType, AppRole, BadgeColor, JobRole, LookupList, LookupValue, PipelineStatus, RuleAction, WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger,
+  ActionType, AppRole, BadgeColor, FormTemplate, JobRole, LookupList, LookupValue, PipelineStatus, RuleAction, WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger,
 } from '../../lib/types';
 import { errMsg, useAsync } from '../../lib/useAsync';
 
@@ -34,6 +35,24 @@ function recipientLabel(r: string) {
 
 const slug = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 
+/** Questions on a module's forms that rules can test, with their possible answers. */
+function questionFields(templates: FormTemplate[], module: WorkflowModule, values: LookupValue[]) {
+  const out: { key: string; label: string; options: { value: string; label: string }[] }[] = [];
+  for (const t of templates.filter((x) => x.category === module && x.status !== 'archived')) {
+    for (const q of t.draft_schema.sections.flatMap((sec) => sec.questions)) {
+      if (!['pass_fail_na', 'yes_no', 'dropdown', 'number', 'text'].includes(q.type) || out.some((o) => o.key === q.id)) continue;
+      const options = q.type === 'pass_fail_na' ? [{ value: 'pass', label: 'Pass' }, { value: 'fail', label: 'Fail' }, { value: 'na', label: 'N/A' }]
+        : q.type === 'yes_no' ? [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]
+        : q.type === 'dropdown' ? (q.lookupKey ? values.filter((v) => v.list_key === q.lookupKey && v.is_active).map((v) => v.label) : q.options ?? []).map((o) => ({ value: o, label: o }))
+        : [];
+      out.push({ key: q.id, label: `${t.name} › ${q.label || q.id}`, options });
+    }
+  }
+  return out;
+}
+
+let QUESTION_LABELS: Record<string, string> = {};
+
 function describeTrigger(r: Pick<WorkflowRule, 'module' | 'trigger_event' | 'trigger_config'>, pipelines: WorkflowPipeline[]) {
   const c = r.trigger_config ?? {};
   const statusLabel = (k?: string) => pipelines.find((p) => p.module === r.module)?.statuses.find((s) => s.key === k)?.label ?? k;
@@ -41,7 +60,7 @@ function describeTrigger(r: Pick<WorkflowRule, 'module' | 'trigger_event' | 'tri
     case 'status_changed':
       return `Status changes${c.from_status ? ` from “${statusLabel(c.from_status)}”` : ''}${c.to_status ? ` to “${statusLabel(c.to_status)}”` : ''}`;
     case 'field_condition': {
-      const f = MODULE_FIELDS[r.module].find((x) => x.key === c.field)?.label ?? c.field ?? '?';
+      const f = MODULE_FIELDS[r.module].find((x) => x.key === c.field)?.label ?? QUESTION_LABELS[c.field ?? ''] ?? c.field ?? '?';
       const v = c.operator === 'in' ? (c.value ?? '').split(',').map((x) => x.trim()).filter(Boolean).join(', ') : c.value ?? '';
       return `${f} ${OPERATOR_LABEL[c.operator ?? 'eq']} “${v}”`;
     }
@@ -57,8 +76,8 @@ function describeTrigger(r: Pick<WorkflowRule, 'module' | 'trigger_event' | 'tri
 // ---------------------------------------------------------------------------
 // Rule editor
 // ---------------------------------------------------------------------------
-function RuleEditor({ initial, pipelines, values, jobRoles, onClose, onSaved }: {
-  initial: Partial<WorkflowRule>; pipelines: WorkflowPipeline[]; values: LookupValue[]; jobRoles: JobRole[];
+function RuleEditor({ initial, pipelines, values, jobRoles, templates, onClose, onSaved }: {
+  initial: Partial<WorkflowRule>; pipelines: WorkflowPipeline[]; values: LookupValue[]; jobRoles: JobRole[]; templates: FormTemplate[];
   onClose: () => void; onSaved: () => void;
 }) {
   const [r, setR] = useState<Partial<WorkflowRule>>({
@@ -74,7 +93,11 @@ function RuleEditor({ initial, pipelines, values, jobRoles, onClose, onSaved }: 
   const statuses = pipelines.find((p) => p.module === r.module)?.statuses ?? [];
   const fields = MODULE_FIELDS[r.module ?? 'safety_event'];
   const field = fields.find((f) => f.key === cfg.field);
-  const fieldValues = field?.lookup ? values.filter((v) => v.list_key === field.lookup && v.is_active) : [];
+  const qFields = questionFields(templates, r.module ?? 'safety_event', values);
+  const qField = qFields.find((f) => f.key === cfg.field);
+  const fieldValues: { id: string; label: string; value: string }[] = field?.lookup
+    ? values.filter((v) => v.list_key === field.lookup && v.is_active).map((v) => ({ id: v.id, label: v.label, value: v.label }))
+    : (qField?.options ?? []).map((o) => ({ id: o.value, label: o.label, value: o.value }));
 
   const setAction = (i: number, a: RuleAction) => setR((x) => ({ ...x, actions: x.actions!.map((y, j) => (j === i ? a : y)) }));
 
@@ -141,7 +164,14 @@ function RuleEditor({ initial, pipelines, values, jobRoles, onClose, onSaved }: 
               <Field label="Field">
                 <Select value={cfg.field ?? ''} onChange={(e) => setCfg({ field: e.target.value || undefined, value: undefined })}>
                   <option value="">Select…</option>
-                  {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  <optgroup label="Record fields">
+                    {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  </optgroup>
+                  {qFields.length > 0 && (
+                    <optgroup label="Form questions">
+                      {qFields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </optgroup>
+                  )}
                 </Select>
               </Field>
               <Field label="Operator">
@@ -153,7 +183,7 @@ function RuleEditor({ initial, pipelines, values, jobRoles, onClose, onSaved }: 
                 {fieldValues.length && cfg.operator !== 'in' ? (
                   <Select value={cfg.value ?? ''} onChange={(e) => setCfg({ value: e.target.value })}>
                     <option value="">Select…</option>
-                    {fieldValues.map((v) => <option key={v.id} value={v.label}>{v.label}</option>)}
+                    {fieldValues.map((v) => <option key={v.id} value={v.value}>{v.label}</option>)}
                   </Select>
                 ) : <Input value={cfg.value ?? ''} onChange={(e) => setCfg({ value: e.target.value })} placeholder={cfg.operator === 'in' ? 'High,Critical' : ''} />}
               </Field>
@@ -161,10 +191,10 @@ function RuleEditor({ initial, pipelines, values, jobRoles, onClose, onSaved }: 
                 <div className="flex flex-wrap gap-2 sm:col-span-3">
                   {fieldValues.map((v) => {
                     const sel = (cfg.value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-                    const on = sel.includes(v.label);
+                    const on = sel.includes(v.value);
                     return (
                       <button key={v.id} type="button" aria-pressed={on}
-                        onClick={() => setCfg({ value: (on ? sel.filter((x) => x !== v.label) : [...sel, v.label]).join(',') })}
+                        onClick={() => setCfg({ value: (on ? sel.filter((x) => x !== v.value) : [...sel, v.value]).join(',') })}
                         className={clsx('min-h-[40px] rounded-lg border-2 px-3 text-sm font-semibold', on ? 'border-brand-500 bg-brand-500 text-white' : 'border-steel-200 bg-white')}>
                         {v.label}
                       </button>
@@ -419,9 +449,15 @@ function PipelinesTab({ pipelines, onSaved }: { pipelines: WorkflowPipeline[]; o
               <Input aria-label="Status label" className="min-w-[160px] flex-1" value={s.label}
                 onChange={(e) => set(i, { label: e.target.value, ...(isNew(s.key) ? { key: slug(e.target.value) } : {}) })} />
               <code className="hidden rounded bg-steel-100 px-2 py-1 text-xs text-steel-600 sm:block" title="Stored key">{s.key || '—'}</code>
-              <Select aria-label="Colour" className="!w-32" value={s.color} onChange={(e) => set(i, { color: e.target.value as BadgeColor })}>
+              <Select aria-label="Colour" className="!w-32" value={s.color.startsWith('#') ? 'custom' : s.color}
+                onChange={(e) => set(i, { color: e.target.value === 'custom' ? '#2047c6' : (e.target.value as BadgeColor) })}>
                 {COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="custom">Custom…</option>
               </Select>
+              {s.color.startsWith('#') && (
+                <input type="color" aria-label="Custom colour" value={s.color} onChange={(e) => set(i, { color: e.target.value })}
+                  className="h-11 w-12 cursor-pointer rounded-lg border-2 border-steel-200 bg-white p-1" />
+              )}
               <label className="flex items-center gap-1.5 text-sm font-semibold"><input type="checkbox" className="h-5 w-5 accent-brand-500" checked={s.is_terminal} onChange={(e) => set(i, { is_terminal: e.target.checked })} />Final</label>
               <div className="flex">
                 <Button variant="ghost" size="sm" aria-label="Move up" disabled={i === 0} icon={<ArrowUp className="h-4 w-4" />} onClick={() => setStatuses((x) => { const n = [...x]; [n[i - 1], n[i]] = [n[i]!, n[i - 1]!]; return n; })} />
@@ -446,6 +482,7 @@ function ListsTab({ lists, values, onChanged }: { lists: LookupList[]; values: L
   const [newCode, setNewCode] = useState('');
   const [newList, setNewList] = useState<{ name: string; key: string; visible: boolean } | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
   const list = lists.find((l) => l.key === key);
   const items = values.filter((v) => v.list_key === key).sort((a, b) => a.sort_order - b.sort_order);
 
@@ -503,7 +540,7 @@ function ListsTab({ lists, values, onChanged }: { lists: LookupList[]; values: L
                 <Button variant="ghost" size="sm" aria-label="Move up" disabled={i === 0} icon={<ArrowUp className="h-4 w-4" />} onClick={() => swap(i, -1)} />
                 <Button variant="ghost" size="sm" aria-label="Move down" disabled={i === items.length - 1} icon={<ArrowDown className="h-4 w-4" />} onClick={() => swap(i, 1)} />
                 <Button variant="ghost" size="sm" aria-label={`Delete ${v.label}`} icon={<Trash2 className="h-4 w-4 text-red-600" />}
-                  onClick={() => window.confirm(`Delete “${v.label}”? Prefer switching it off if it's used on existing records.`) && run(() => api.deleteLookupValue(v.id), 'Value deleted')} />
+                  onClick={async () => (await confirm({ title: 'Delete value', message: `Delete “${v.label}”? If it's used on existing records, switch it off instead.`, confirmLabel: 'Delete', danger: true })) && run(() => api.deleteLookupValue(v.id), 'Value deleted')} />
               </li>
             ))}
             {!items.length && <li className="px-3 py-6 text-center text-sm text-steel-500">No values yet.</li>}
@@ -614,11 +651,13 @@ export default function WorkflowPage() {
   const [tab, setTab] = useState<Tab>('rules');
   const [editing, setEditing] = useState<Partial<WorkflowRule> | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
   const { data, loading, error, reload, setData } = useAsync(async () => {
-    const [rules, pipelines, lists, values, jobRoles] = await Promise.all([
-      api.listRules(), api.listPipelines(), api.listLookupLists(), api.listLookupValues(), api.listJobRoles(),
+    const [rules, pipelines, lists, values, jobRoles, templates] = await Promise.all([
+      api.listRules(), api.listPipelines(), api.listLookupLists(), api.listLookupValues(), api.listJobRoles(), api.listTemplates(),
     ]);
-    return { rules, pipelines, lists, values, jobRoles };
+    QUESTION_LABELS = Object.fromEntries(templates.flatMap((t) => t.draft_schema.sections.flatMap((sec) => sec.questions.map((q) => [q.id, `${t.name} › ${q.label}`]))));
+    return { rules, pipelines, lists, values, jobRoles, templates };
   }, []);
   const enabled = useMemo(() => data?.rules.filter((r) => r.is_enabled).length ?? 0, [data]);
 
@@ -633,7 +672,7 @@ export default function WorkflowPage() {
     }
   };
   const del = async (r: WorkflowRule) => {
-    if (!window.confirm(`Delete rule “${r.name}”?`)) return;
+    if (!(await confirm({ title: 'Delete rule', message: `Delete rule “${r.name}”? This can't be undone.`, confirmLabel: 'Delete', danger: true }))) return;
     try { await api.deleteRule(r.id); toast('Rule deleted'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
   };
 
@@ -656,7 +695,7 @@ export default function WorkflowPage() {
           {tab === 'test' && <TestTab pipelines={data.pipelines} values={data.values} />}
         </>
       )}
-      {editing && data && <RuleEditor initial={editing} pipelines={data.pipelines} values={data.values} jobRoles={data.jobRoles}
+      {editing && data && <RuleEditor initial={editing} pipelines={data.pipelines} values={data.values} jobRoles={data.jobRoles} templates={data.templates}
         onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void reload(); }} />}
       <p className="mt-8 flex items-center gap-2 text-xs text-steel-500"><Workflow className="h-4 w-4" />
         Rules are evaluated in the database by <code className="rounded bg-steel-200 px-1">run_workflow_rules()</code>, which Phase 2 module triggers call on insert/update. <List className="h-4 w-4" />

@@ -58,20 +58,37 @@ const badgeColors: Record<BadgeColor, string> = {
   slate: 'bg-steel-100 text-steel-700 ring-steel-300',
   blue: 'bg-blue-50 text-blue-800 ring-blue-300',
   amber: 'bg-amber-50 text-amber-900 ring-amber-300',
-  orange: 'bg-brand-50 text-brand-800 ring-brand-300',
+  orange: 'bg-orange-50 text-orange-800 ring-orange-300',
   green: 'bg-emerald-50 text-emerald-800 ring-emerald-300',
   red: 'bg-red-50 text-red-800 ring-red-300',
   purple: 'bg-violet-50 text-violet-800 ring-violet-300',
 };
 const dotColors: Record<BadgeColor, string> = {
-  slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-brand-500',
+  slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-orange-500',
   green: 'bg-emerald-500', red: 'bg-red-500', purple: 'bg-violet-500',
 };
 
-export function Badge({ color = 'slate', children, dot = true, className }: { color?: BadgeColor; children: ReactNode; dot?: boolean; className?: string }) {
+/** Darken a #rrggbb colour (0..1) — used for readable text on custom-colour badges. */
+function shade(hex: string, amount: number) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c: number) => Math.round(c * (1 - amount)).toString(16).padStart(2, '0');
+  return `#${f((n >> 16) & 255)}${f((n >> 8) & 255)}${f(n & 255)}`;
+}
+
+export function Badge({ color = 'slate', children, dot = true, className }: { color?: BadgeColor | string; children: ReactNode; dot?: boolean; className?: string }) {
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    return (
+      <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ring-inset', className)}
+        style={{ backgroundColor: `${color}1f`, color: shade(color, 0.45), boxShadow: `inset 0 0 0 1px ${color}80` }}>
+        {dot && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />}
+        {children}
+      </span>
+    );
+  }
+  const c = (color in badgeColors ? color : 'slate') as BadgeColor;
   return (
-    <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ring-inset', badgeColors[color], className)}>
-      {dot && <span className={clsx('h-1.5 w-1.5 rounded-full', dotColors[color])} />}
+    <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ring-inset', badgeColors[c], className)}>
+      {dot && <span className={clsx('h-1.5 w-1.5 rounded-full', dotColors[c])} />}
       {children}
     </span>
   );
@@ -116,7 +133,7 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
 export function Select({ className, children, ...p }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select className={clsx('input appearance-none bg-[length:20px] bg-[right_10px_center] bg-no-repeat pr-10', className)}
-      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23515c73' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")" }}
+      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%234a5670' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")" }}
       {...p}>
       {children}
     </select>
@@ -297,7 +314,7 @@ export function Avatar({ name, size = 'md', className }: { name: string; size?: 
 
 export function StatCard({ label, value, icon, tone = 'slate', hint, placeholder }: { label: string; value: ReactNode; icon?: ReactNode; tone?: BadgeColor; hint?: string; placeholder?: boolean }) {
   const toneBar: Record<BadgeColor, string> = {
-    slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-brand-500',
+    slate: 'bg-steel-400', blue: 'bg-blue-500', amber: 'bg-amber-500', orange: 'bg-orange-500',
     green: 'bg-emerald-500', red: 'bg-red-500', purple: 'bg-violet-500',
   };
   return (

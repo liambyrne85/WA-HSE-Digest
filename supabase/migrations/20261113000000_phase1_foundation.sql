@@ -263,6 +263,7 @@ with (security_invoker = false) as
    where public.is_leader()
       or (p.is_active and public.is_internal_user() and p.role in ('leader','employee'))
       or (p.is_active and public.is_contractor() and p.organization_id = public.current_org_id());
+revoke all on public.profile_directory from anon;
 grant select on public.profile_directory to authenticated;
 
 -- -----------------------------------------------------------------------------

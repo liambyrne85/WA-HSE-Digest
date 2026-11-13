@@ -163,7 +163,7 @@ begin
     ('Daily Plant Pre-Start – Earthmoving', 'Operator pre-start for excavators, loaders and dozers.', 'plant_prestart'::public.template_category,
      '{"settings":{"requireProject":true,"requireSignOff":true},"sections":[
        {"id":"s-details","title":"Plant Details","questions":[
-         {"id":"q-plant","label":"Plant category","type":"dropdown","required":true,"options":["Excavator","Wheel Loader","Dozer","Grader","Roller / Compactor"]},
+         {"id":"q-plant","label":"Plant category","type":"dropdown","required":true,"lookupKey":"plant_categories"},
          {"id":"q-fleet","label":"Fleet / asset number","type":"text","required":true},
          {"id":"q-hours","label":"Hour meter reading","type":"number","required":true,"unit":"hrs"}]},
        {"id":"s-walk","title":"Walk-around Inspection","questions":[
@@ -195,7 +195,7 @@ begin
      '{"settings":{"requireProject":true,"requireSignOff":true},"sections":[
        {"id":"s-task","title":"The Task","questions":[
          {"id":"q-task","label":"Describe the task","type":"text","required":true,"multiline":true},
-         {"id":"q-hazcat","label":"Main hazard category","type":"dropdown","required":true,"options":["Working at Heights","Mobile Plant Interaction","Excavation / Trenching","Underground Services","Manual Handling","Heat Stress / Fatigue"]}]},
+         {"id":"q-hazcat","label":"Main hazard category","type":"dropdown","required":true,"lookupKey":"hazard_categories"}]},
        {"id":"s-check","title":"Step Back","questions":[
          {"id":"q-swms","label":"I have read and understood the SWMS / JSEA","type":"yes_no","required":true},
          {"id":"q-ppe","label":"I have the correct PPE","type":"yes_no","required":true},
@@ -206,8 +206,8 @@ begin
     ('Safety Event Report', 'Initial notification of an incident, near miss or hazard.', 'safety_event'::public.template_category,
      '{"settings":{"requireProject":true,"requireSignOff":false},"sections":[
        {"id":"s-what","title":"What Happened","questions":[
-         {"id":"q-type","label":"Event type","type":"dropdown","required":true,"options":["Near Miss","First Aid Injury","Medical Treatment Injury","Lost Time Injury","Property / Plant Damage","Environmental Incident","Hazard Report"]},
-         {"id":"q-sev","label":"Severity","type":"dropdown","required":true,"options":["Low","Medium","High","Critical"]},
+         {"id":"q-type","label":"Event type","type":"dropdown","required":true,"lookupKey":"event_types"},
+         {"id":"q-sev","label":"Severity","type":"dropdown","required":true,"lookupKey":"severity_levels"},
          {"id":"q-desc","label":"Description","type":"text","required":true,"multiline":true},
          {"id":"q-photo","label":"Photo of the scene","type":"photo","required":false}]},
        {"id":"s-immediate","title":"Immediate Actions","questions":[

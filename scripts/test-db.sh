@@ -26,4 +26,6 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
 done
 echo "→ running RLS tests"
 "${PSQL[@]}" -f "$ROOT/supabase/tests/rls_test.sql"
+echo "→ running records engine tests"
+"${PSQL[@]}" -f "$ROOT/supabase/tests/records_test.sql"
 echo "✔ all database tests passed"

@@ -1,4 +1,5 @@
-import { HardHat, KeyRound, Mail, RotateCcw } from 'lucide-react';
+import { KeyRound, Mail, RotateCcw, UserPlus } from 'lucide-react';
+import { BrandLockup } from '../components/layout/BrandMark';
 import { useState } from 'react';
 import { Badge, Button, Field, Input } from '../components/ui';
 import { api } from '../lib/api';
@@ -8,7 +9,8 @@ import { errMsg } from '../lib/useAsync';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [mode, setMode] = useState<'password' | 'magic' | 'reset'>('password');
+  const [fullName, setFullName] = useState('');
+  const [mode, setMode] = useState<'password' | 'magic' | 'reset' | 'signup'>('password');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -24,6 +26,11 @@ export default function LoginPage() {
       if (mode === 'magic') {
         await api.signInWithMagicLink(email);
         setInfo('Check your email for a sign-in link.');
+      }
+      if (mode === 'signup') {
+        if (password.length < 8) throw new Error('Use a password of at least 8 characters.');
+        const { needsConfirmation } = await api.signUp(email, password, fullName.trim());
+        if (needsConfirmation) setInfo('Check your email and click the confirmation link to finish creating your account.');
       }
       if (mode === 'reset') {
         await api.sendPasswordReset(email);
@@ -41,14 +48,13 @@ export default function LoginPage() {
       {/* Hero */}
       <div className="relative flex flex-col justify-between overflow-hidden bg-steel-900 px-6 py-8 text-white lg:w-[46%] lg:px-12 lg:py-12">
         <div className="pointer-events-none absolute inset-0 opacity-[0.07]"
-          style={{ backgroundImage: 'repeating-linear-gradient(-45deg, #f97316 0 18px, transparent 18px 36px)' }} />
-        <div className="relative flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500"><HardHat className="h-6 w-6" /></span>
-          <span className="font-display text-3xl font-bold uppercase tracking-wide">Field<span className="text-brand-500">Ops</span></span>
+          style={{ backgroundImage: 'repeating-linear-gradient(-45deg, #f5b81a 0 18px, transparent 18px 36px)' }} />
+        <div className="relative">
+          <BrandLockup size="lg" />
         </div>
         <div className="relative mt-8 lg:mt-0">
           <h1 className="text-4xl font-bold uppercase leading-[0.95] sm:text-5xl lg:text-6xl">
-            Operations.<br />HSEQ.<br /><span className="text-brand-500">Workforce.</span>
+            Operations.<br />HSEQ.<br /><span className="text-hivis-500">Workforce.</span>
           </h1>
           <p className="mt-4 max-w-md text-steel-300">
             One place for your crews, contractors, sites, safety records and plant — built for the field, from the ute to the office.
@@ -61,42 +67,56 @@ export default function LoginPage() {
       <div className="flex flex-1 items-start justify-center bg-steel-100 px-4 py-8 lg:items-center">
         <div className="w-full max-w-md">
           <div className="card p-6">
-            <h2 className="text-3xl font-bold uppercase">{mode === 'reset' ? 'Reset password' : 'Sign in'}</h2>
+            <h2 className="text-3xl font-bold uppercase">{mode === 'reset' ? 'Reset password' : mode === 'signup' ? 'Create account' : 'Sign in'}</h2>
             <p className="mb-5 mt-1 text-sm text-steel-600">
-              {mode === 'reset' ? "We'll email you a link to set a new password." : 'Use the email address your invitation was sent to.'}
+              {mode === 'reset' ? "We'll email you a link to set a new password."
+                : mode === 'signup' ? 'The first account created becomes the Leader. Anyone else should use the invitation they were sent; accounts created here wait for a Leader to activate them.'
+                : 'Use the email address your invitation was sent to.'}
             </p>
             <form onSubmit={submit} className="space-y-4">
+              {mode === 'signup' && (
+                <Field label="Full name" htmlFor="fullname">
+                  <Input id="fullname" autoComplete="name" required value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                </Field>
+              )}
               <Field label="Email" htmlFor="email">
                 <Input id="email" type="email" autoComplete="email" inputMode="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com.au" />
               </Field>
-              {mode === 'password' && (
-                <Field label="Password" htmlFor="password">
-                  <Input id="password" type="password" autoComplete="current-password" required={!demo} value={password} onChange={(e) => setPassword(e.target.value)} />
+              {(mode === 'password' || mode === 'signup') && (
+                <Field label="Password" htmlFor="password" hint={mode === 'signup' ? 'At least 8 characters' : undefined}>
+                  <Input id="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required={!demo} value={password} onChange={(e) => setPassword(e.target.value)} />
                 </Field>
               )}
               {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p>}
               {info && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">{info}</p>}
               <Button type="submit" size="lg" block loading={busy}
-                icon={mode === 'password' ? <KeyRound className="h-5 w-5" /> : mode === 'magic' ? <Mail className="h-5 w-5" /> : <RotateCcw className="h-5 w-5" />}>
-                {mode === 'password' ? 'Sign in' : mode === 'magic' ? 'Email me a sign-in link' : 'Send reset link'}
+                icon={mode === 'password' ? <KeyRound className="h-5 w-5" /> : mode === 'magic' ? <Mail className="h-5 w-5" /> : mode === 'signup' ? <UserPlus className="h-5 w-5" /> : <RotateCcw className="h-5 w-5" />}>
+                {mode === 'password' ? 'Sign in' : mode === 'magic' ? 'Email me a sign-in link' : mode === 'signup' ? 'Create account' : 'Send reset link'}
               </Button>
             </form>
             <div className="mt-4 flex flex-wrap justify-between gap-2 text-sm font-semibold">
               {mode !== 'password'
                 ? <button className="text-brand-700 hover:underline" onClick={() => setMode('password')}>Sign in with password</button>
                 : <button className="text-brand-700 hover:underline" onClick={() => setMode('magic')}>Email me a link instead</button>}
-              {mode !== 'reset' && <button className="text-steel-600 hover:underline" onClick={() => setMode('reset')}>Forgot password?</button>}
+              {mode !== 'reset' && mode !== 'signup' && <button className="text-steel-600 hover:underline" onClick={() => setMode('reset')}>Forgot password?</button>}
             </div>
+            {!demo && mode !== 'signup' && (
+              <p className="mt-4 border-t border-steel-200 pt-4 text-sm text-steel-600">
+                Setting up for the first time?{' '}
+                <button className="font-semibold text-brand-700 hover:underline" onClick={() => { setMode('signup'); setError(null); setInfo(null); }}>Create the first account</button>
+              </p>
+            )}
           </div>
 
           {demo && api.demoAccounts && (
             <div className="card mt-4 p-5">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-xl font-bold uppercase">Demo accounts</h3>
-                <Badge color="amber">No database</Badge>
+                <Badge color="amber">Sample data</Badge>
               </div>
               <p className="mb-3 text-sm text-steel-600">
-                Supabase isn't configured, so the app is running on local demo data. Pick a user to see how each role experiences the app.
+                This is a demo with sample data. Pick a person to see the app as a Leader, an employee or a contractor.
+                Anything you change stays in this browser only; use “Reset demo data” to start again.
               </p>
               <div className="space-y-2">
                 {api.demoAccounts().map((a) => (

@@ -3,7 +3,7 @@
 
 
 create schema if not exists tests;
-grant usage on schema tests to authenticated;
+grant usage on schema tests to authenticated, anon;
 
 create or replace function tests.assert_count(q text, expected bigint, msg text)
 returns void language plpgsql as $$
@@ -33,7 +33,7 @@ returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated')::text, false);
 end $$;
-grant execute on all functions in schema tests to authenticated;
+grant execute on all functions in schema tests to authenticated, anon;
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (as superuser / service context)
@@ -91,7 +91,7 @@ select tests.login('11111111-1111-1111-1111-111111111111');
 select tests.assert_count('select * from public.profiles', 6, 'leader sees all profiles');
 select tests.assert_count('select * from public.organizations', 3, 'leader sees all organisations');
 select tests.assert_count('select * from public.job_role_rates', 7, 'leader sees commercial rates');
-select tests.assert_count('select * from public.workflow_rules', 4, 'leader sees workflow rules');
+select tests.assert_count('select * from public.workflow_rules', 5, 'leader sees workflow rules');
 select tests.assert_count('select * from public.user_invitations', 4, 'leader sees invitations');
 select tests.assert_count($$select * from public.lookup_values where list_key = 'cost_codes'$$, 6, 'leader sees cost codes');
 
@@ -147,7 +147,7 @@ select tests.assert_count('select * from public.workflow_rules', 0, 'employee ca
 select tests.assert_count('select * from public.user_invitations', 0, 'employee cannot see invitations');
 select tests.assert_count('select * from public.projects', 2, 'employee sees all projects');
 select tests.assert_count('select * from public.worker_tickets', 1, 'employee sees own tickets only');
-select tests.assert_count($$select * from public.form_templates where status = 'published'$$, 4, 'employee sees published templates');
+select tests.assert_count($$select * from public.form_templates where status = 'published'$$, 6, 'employee sees published templates');
 select tests.assert_fails($$update public.profiles set role = 'leader' where id = '22222222-2222-2222-2222-222222222222'$$, 'employee cannot self-promote');
 update public.profiles set phone = '0400 000 000' where id = '22222222-2222-2222-2222-222222222222';
 select tests.assert_count($$select 1 from public.profiles where phone = '0400 000 000'$$, 1, 'employee can update own contact details');
@@ -223,7 +223,7 @@ begin
   ids := public.run_workflow_rules('safety_event', 'field_condition',
           '{"severity":"Critical","organization_id":"00000000-0000-0000-0000-00000000000a"}');
   if array_length(ids, 1) <> 1 then raise exception 'FAIL: expected one rule'; end if;
-  if (select count(*) from public.notifications) <> 1 then raise exception 'FAIL: expected 1 in-app notification (1 leader)'; end if;
-  if (select count(*) from public.notification_outbox where channel = 'email') <> 1 then raise exception 'FAIL: expected 1 email'; end if;
+  if (select count(*) from public.notifications where rule_id = ids[1]) <> 1 then raise exception 'FAIL: expected 1 in-app notification (1 leader)'; end if;
+  if (select count(*) from public.notification_outbox where channel = 'email' and rule_id = ids[1]) <> 1 then raise exception 'FAIL: expected 1 email'; end if;
   raise notice 'ok  run_workflow_rules fans out notifications + email outbox';
 end $$;

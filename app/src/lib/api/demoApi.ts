@@ -1,7 +1,8 @@
 import type { Api, DemoAccount, Session } from './types';
 import { buildDemoSeed, type DemoDb } from './demoSeed';
+import { computeSummary, MODULE_PREFIX, nextStatus, resolveSubmitStatus, ruleRecord } from '../recordsLogic';
 import type {
-  FormTemplate, FormTemplateVersion, Profile, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  FormTemplate, FormTemplateVersion, Invitation, Profile, RecordApproval, RecordRow, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -9,7 +10,7 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v1';
+const DB_KEY = 'fieldops-demo-db-v2';
 const SESSION_KEY = 'fieldops-demo-session';
 
 const uuid = () =>
@@ -95,9 +96,226 @@ export function createDemoApi(): Api {
     if (role !== 'contractor' && o.type !== 'internal') throw new Error('Leaders and employees must belong to the internal company');
   };
 
+  // ---- records engine (mirrors the database triggers) ------------------------
+  const pipelines = () => db.pipelines;
+  const canSee = (r: RecordRow) => {
+    const m = me();
+    if (!m) return false;
+    return m.role === 'leader' || r.submitted_by === m.id
+      || (m.role === 'contractor' && r.organization_id === m.organization_id)
+      || db.approvals.some((a) => a.submission_id === r.id && a.status === 'pending' && a.approver_role === m.role);
+  };
+  const logEvent = (submission_id: string, kind: 'created' | 'status' | 'approval_requested' | 'approval' | 'comment',
+    extra: { from_status?: string | null; to_status?: string | null; body?: string | null; actor?: string | null } = {}) => {
+    db.events.push({ id: uuid(), submission_id, kind, from_status: extra.from_status ?? null, to_status: extra.to_status ?? null,
+      body: extra.body ?? null, actor: extra.actor === undefined ? session?.userId ?? null : extra.actor, created_at: nowIso() });
+  };
+  const runRules = (module: WorkflowModule, event: WorkflowTrigger, rec: Record<string, unknown>, old?: Record<string, unknown>) => {
+    const recId = rec.id as string | undefined;
+    for (const r of [...db.rules].filter((x) => x.module === module && x.trigger_event === event && x.is_enabled).sort((a, b) => a.priority - b.priority)) {
+      if (!ruleMatches(r, event, rec, old)) continue;
+      if (recId && r.approval_chain.length && !db.approvals.some((a) => a.submission_id === recId && a.rule_id === r.id && ['waiting', 'pending'].includes(a.status))) {
+        const first = Math.min(...r.approval_chain.map((s) => s.step));
+        for (const s of r.approval_chain) {
+          db.approvals.push({ id: uuid(), submission_id: recId, rule_id: r.id, step: s.step, approver_role: s.role, job_role_id: s.job_role_id ?? null,
+            status: s.step === first ? 'pending' : 'waiting', due_at: s.step === first && s.sla_hours ? new Date(Date.now() + s.sla_hours * 36e5).toISOString() : null,
+            decided_by: null, decided_at: null, comment: null, created_at: nowIso() });
+        }
+        logEvent(recId, 'approval_requested', { body: r.name, actor: null });
+      }
+      for (const a of r.actions) {
+        if (a.type !== 'in_app') continue;
+        const msg = `${rec.reference ? `${rec.reference}: ` : ''}${a.message || r.name}`;
+        const targets = db.profiles.filter((p) => p.is_active && a.recipients.some((rc) =>
+          (rc.startsWith('role:') && p.role === rc.slice(5) && (p.role !== 'contractor' || p.organization_id === rec.organization_id))
+          || (rc === 'submitter' && p.id === rec.submitted_by)));
+        for (const p of targets) {
+          db.notifications.push({ id: uuid(), user_id: p.id, title: r.name, body: msg, link: (rec.link as string) ?? null, read_at: null, created_at: nowIso() });
+        }
+      }
+    }
+  };
+  const afterWrite = (row: RecordRow, prev: RecordRow | null) => {
+    if (!prev) logEvent(row.id, 'created', { to_status: row.status, actor: row.submitted_by });
+    else if (prev.status !== row.status) logEvent(row.id, 'status', { from_status: prev.status, to_status: row.status });
+    if (row.status === 'draft') return;
+    const rec = ruleRecord(row as unknown as RecordRow & Record<string, unknown>);
+    const old = prev ? (prev as unknown as Record<string, unknown>) : undefined;
+    if (!prev || prev.status === 'draft') {
+      runRules(row.module, 'record_created', rec);
+      runRules(row.module, 'field_condition', rec);
+    }
+    if (!prev || prev.status !== row.status) runRules(row.module, 'status_changed', rec, old);
+  };
+  const recordsApi = {
+    async listRecords(module?: WorkflowModule) {
+      return delay(db.records.filter((r) => canSee(r) && (!module || r.module === module))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    },
+    async getRecord(id: string) {
+      const record = db.records.find((r) => r.id === id);
+      if (!record || !canSee(record)) return delay(null);
+      const version = db.versions.find((v) => v.id === record.template_version_id)!;
+      return delay({
+        record, version,
+        approvals: db.approvals.filter((a) => a.submission_id === id).sort((a, b) => a.step - b.step),
+        events: db.events.filter((e) => e.submission_id === id).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      });
+    },
+    async getTemplateVersion(id: string) {
+      return delay(db.versions.find((v) => v.id === id) ?? null);
+    },
+    async saveRecord(input: { id: string; template_version_id: string; project_id: string | null; answers: Record<string, unknown>; status: string; isNew: boolean }) {
+      const m = requireMe();
+      const version = db.versions.find((v) => v.id === input.template_version_id);
+      if (!version) throw new Error('Template version not found');
+      if (input.project_id && !canAccessProject(input.project_id)) throw new Error("You don't have access to that project");
+      const prev = input.isNew ? null : db.records.find((r) => r.id === input.id) ?? null;
+      if (!input.isNew) {
+        if (!prev || !canSee(prev)) throw new Error('Record not found');
+        if (m.role !== 'leader' && !(prev.submitted_by === m.id && ['draft', 'rejected', 'returned'].includes(prev.status))) {
+          throw new Error('This record can no longer be edited');
+        }
+      }
+      const summary = computeSummary(version.schema, input.answers);
+      const module = version.category as WorkflowModule;
+      if (m.role !== 'leader' && !['draft', 'submitted'].includes(input.status)) throw new Error(`Only leaders can move a record to "${input.status}"`);
+      let status: string = input.status;
+      let submitted_at = prev?.submitted_at ?? null;
+      if (input.status === 'submitted' && (!prev || prev.status !== 'submitted')) {
+        status = resolveSubmitStatus(pipelines(), module, version.schema, Number(summary.critical_failures) || 0);
+        submitted_at = submitted_at ?? nowIso();
+      }
+      let row: RecordRow;
+      if (prev) {
+        row = { ...prev, project_id: input.project_id, answers: input.answers, summary, status, submitted_at, updated_at: nowIso(),
+          last_status_change_at: prev.status !== status ? nowIso() : prev.last_status_change_at };
+        db.records = db.records.map((r) => (r.id === row.id ? row : r));
+      } else {
+        const n = (db.counters[module] ?? 0) + 1;
+        db.counters[module] = n;
+        row = { id: input.id, template_version_id: version.id, module, reference: `${MODULE_PREFIX[module]}-${String(n).padStart(5, '0')}`,
+          title: version.name, project_id: input.project_id, organization_id: m.organization_id, submitted_by: m.id, status,
+          answers: input.answers, summary, submitted_at, created_at: nowIso(), updated_at: nowIso(), last_status_change_at: nowIso() };
+        db.records.push(row);
+      }
+      afterWrite(row, prev);
+      commit();
+      return delay(row);
+    },
+    async setRecordStatus(id: string, status: string) {
+      requireLeader();
+      const prev = db.records.find((r) => r.id === id)!;
+      const row = { ...prev, status, last_status_change_at: nowIso(), updated_at: nowIso() };
+      db.records = db.records.map((r) => (r.id === id ? row : r));
+      afterWrite(row, prev);
+      commit();
+      await delay(null);
+    },
+    async deleteRecord(id: string) {
+      const m = requireMe();
+      const r = db.records.find((x) => x.id === id);
+      if (!r) return;
+      if (!(m.role === 'leader' || (r.submitted_by === m.id && r.status === 'draft'))) throw new Error('Only drafts can be deleted');
+      db.records = db.records.filter((x) => x.id !== id);
+      db.approvals = db.approvals.filter((x) => x.submission_id !== id);
+      db.events = db.events.filter((x) => x.submission_id !== id);
+      commit();
+      await delay(null);
+    },
+    async decideApproval(approvalId: string, decision: 'approved' | 'rejected', comment?: string) {
+      const m = requireMe();
+      const a = db.approvals.find((x) => x.id === approvalId);
+      if (!a || a.status !== 'pending') throw new Error('This approval step is no longer waiting for a decision');
+      if (!(m.role === 'leader' || (m.role === a.approver_role && (!a.job_role_id || m.job_role_id === a.job_role_id)))) {
+        throw new Error('You are not an approver for this step');
+      }
+      if (decision === 'rejected' && !comment?.trim()) throw new Error('Add a comment explaining what needs to change');
+      Object.assign(a, { status: decision, decided_by: m.id, decided_at: nowIso(), comment: comment?.trim() || null });
+      const prev = db.records.find((r) => r.id === a.submission_id)!;
+      logEvent(prev.id, 'approval', { body: `${decision === 'approved' ? 'Approved' : 'Rejected'}${comment?.trim() ? `: ${comment.trim()}` : ''}` });
+      let target: string | null = null;
+      if (decision === 'approved') {
+        const nxt = db.approvals.filter((x) => x.submission_id === prev.id && x.rule_id === a.rule_id && x.status === 'waiting').sort((x, y) => x.step - y.step)[0];
+        if (nxt) nxt.status = 'pending';
+        else if (!db.approvals.some((x) => x.submission_id === prev.id && ['waiting', 'pending'].includes(x.status))) {
+          target = nextStatus(pipelines(), prev.module, prev.status);
+        }
+      } else {
+        db.approvals.filter((x) => x.submission_id === prev.id && ['waiting', 'pending'].includes(x.status)).forEach((x) => { x.status = 'cancelled'; });
+        const keys = pipelines().find((p) => p.module === prev.module)?.statuses.map((s) => s.key) ?? [];
+        target = keys.includes('rejected') ? 'rejected' : keys.includes('returned') ? 'returned' : 'draft';
+      }
+      if (target) {
+        const row = { ...prev, status: target, last_status_change_at: nowIso() };
+        db.records = db.records.map((r) => (r.id === row.id ? row : r));
+        afterWrite(row, prev);
+      }
+      commit();
+      await delay(null);
+    },
+    async addComment(recordId: string, body: string) {
+      const r = db.records.find((x) => x.id === recordId);
+      if (!r || !canSee(r)) throw new Error('Record not found');
+      logEvent(recordId, 'comment', { body });
+      commit();
+      await delay(null);
+    },
+    async listMyPendingApprovals() {
+      const m = me();
+      if (!m) return delay([]);
+      return delay(db.approvals
+        .filter((a) => a.status === 'pending' && (m.role === 'leader' || a.approver_role === m.role))
+        .map((a) => ({ ...a, record: db.records.find((r) => r.id === a.submission_id)! }))
+        .filter((a) => a.record) as (RecordApproval & { record: RecordRow })[]);
+    },
+    async fileUrl(ref: string) { return ref; },
+    async listDirectory() {
+      const m = me();
+      if (!m) return delay([]);
+      return delay(db.profiles.filter((p) => m.role === 'leader'
+        || (p.is_active && m.role === 'employee' && p.role !== 'contractor')
+        || (p.is_active && m.role === 'contractor' && p.organization_id === m.organization_id))
+        .map(({ id, full_name, role, organization_id }) => ({ id, full_name, role, organization_id })));
+    },
+    async getSettings() { return delay(db.settings); },
+    async saveSettings(patch: Partial<DemoDb['settings']>) {
+      requireLeader();
+      db.settings = { ...db.settings, ...patch };
+      commit();
+      return delay(db.settings);
+    },
+    async uploadLogo(file: File) {
+      requireLeader();
+      return new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result as string);
+        r.onerror = () => rej(new Error('Could not read the file'));
+        r.readAsDataURL(file);
+      });
+    },
+  };
+
+  // Seed a few sample records the first time so lists aren't empty.
+  if (!db.records.length && !(db as Partial<DemoDb>).counters?.safety_event) {
+    const ver = (cat: string) => db.versions.find((v) => v.category === cat)!;
+    const asUser = (uid: string, fn: () => void) => { const s = session; session = { userId: uid, email: '' }; try { fn(); } finally { session = s; } };
+    const mk = (uid: string, cat: string, project: string | null, answers: Record<string, unknown>) => asUser(uid, () => {
+      void recordsApi.saveRecord({ id: uuid(), template_version_id: ver(cat).id, project_id: project, answers, status: 'submitted', isNew: true });
+    });
+    mk('u-emp', 'safety_event', 'p-1', { 'q-type': 'Near Miss', 'q-sev': 'High', 'q-desc': 'Light vehicle entered excavator swing radius while loading trucks. No contact.', 'q-made-safe': 'yes', 'q-actions': 'Stopped work, re-briefed spotter, exclusion zone re-marked with bunting.' });
+    mk('u-acme1', 'daily_field_report', 'p-1', { 'q-shift': 'Day', 'q-weather': 'Hot (over 35°C)',
+      'q-crew': [{ name: 'Alice Nguyen', role: 'Supervisor', hours: '10' }, { name: 'Tom Walsh', role: 'Operator', hours: '10' }, { name: 'Ravi Patel', role: 'Labourer', hours: '9.5' }],
+      'q-plant': [{ plant: 'EX-12 30t excavator', plant_hours: '8' }], 'q-work': 'Bulk cut ch 1200–1350, 1,800 m³ to fill.', 'q-incidents': 'no' });
+    mk('u-acme1', 'plant_prestart', 'p-2', { 'q-plant': 'Excavator', 'q-fleet': 'EX-12', 'q-hours': '4521', 'q-fluids': 'pass', 'q-leaks': 'pass', 'q-tracks': 'pass', 'q-glass': 'pass',
+      'q-seatbelt': 'pass', 'q-alarm': 'fail', 'q-brakes': 'pass', 'q-fire': 'yes', 'q-fit': 'yes' });
+    db.notifications = db.notifications.filter((n) => !n.body?.match(/^(SE|DFR|PS)-/) || n.user_id === 'u-leader');
+    commit();
+  }
+
   const accounts: DemoAccount[] = [
-    { id: 'u-leader', label: 'Sam Carter', role: 'leader', description: 'Project Manager · Ironbark Civil (Leader)' },
-    { id: 'u-emp', label: 'Jordan Reid', role: 'employee', description: 'Plant Operator · Ironbark Civil (Employee)' },
+    { id: 'u-leader', label: 'Sam Carter', role: 'leader', description: 'Project Manager · Access & Site (Leader)' },
+    { id: 'u-emp', label: 'Jordan Reid', role: 'employee', description: 'Plant Operator · Access & Site (Employee)' },
     { id: 'u-acme1', label: 'Alice Nguyen', role: 'contractor', description: 'Supervisor · Acme Earthworks (Contractor)' },
     { id: 'u-bravo1', label: 'Ben Hughes', role: 'contractor', description: 'Supervisor · Bravo Traffic Mgmt (Contractor)' },
     { id: 'u-pending', label: 'Casey Morgan', role: 'employee', description: 'Self-registered, awaiting activation' },
@@ -119,9 +337,15 @@ export function createDemoApi(): Api {
     async sendPasswordReset() {
       throw new Error('Password reset needs Supabase — not available in demo mode.');
     },
+    async signUp() {
+      throw new Error('Creating accounts needs Supabase — in demo mode, pick one of the demo accounts.');
+    },
+    async updatePassword() {
+      throw new Error('Passwords need Supabase — not available in demo mode.');
+    },
     async signOut() {
       session = null;
-      localStorage.removeItem(SESSION_KEY);
+      try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
       emit();
     },
     demoAccounts: () => accounts,
@@ -129,7 +353,7 @@ export function createDemoApi(): Api {
       const p = db.profiles.find((x) => x.id === userId);
       if (!p) throw new Error('Unknown demo user');
       session = { userId: p.id, email: p.email };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch { /* ignore */ }
       emit();
     },
     demoReset() {
@@ -210,10 +434,19 @@ export function createDemoApi(): Api {
       db.invitations.forEach((i) => { if (i.email === email && i.status === 'pending') i.status = 'revoked'; });
       const inv = {
         id: uuid(), email, full_name: input.full_name ?? null, role: input.role, organization_id: input.organization_id,
-        job_role_id: input.job_role_id ?? null, status: 'pending' as const, invited_by: session!.userId,
+        job_role_id: input.job_role_id ?? null, status: 'pending' as Invitation['status'], invited_by: session!.userId,
         expires_at: new Date(Date.now() + 14 * 864e5).toISOString(), created_at: nowIso(),
       };
       db.invitations.push(inv);
+      if (input.temp_password) {
+        // Mirror the server: the account exists immediately.
+        inv.status = 'accepted';
+        db.profiles.push({
+          id: uuid(), email, full_name: input.full_name || email.split('@')[0]!, role: input.role,
+          organization_id: input.organization_id, job_role_id: input.job_role_id ?? null, phone: null,
+          employee_number: null, emergency_contact_name: null, emergency_contact_phone: null, is_active: true, created_at: nowIso(),
+        });
+      }
       commit();
       return delay(inv);
     },
@@ -484,6 +717,8 @@ export function createDemoApi(): Api {
       commit();
       await delay(null);
     },
+
+    ...recordsApi,
 
     // ---- notifications ---------------------------------------------------
     async listNotifications() {

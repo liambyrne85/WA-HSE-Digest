@@ -2,6 +2,7 @@ import { BadgeCheck, GraduationCap, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Avatar, Badge, Button, EmptyState, ErrorBanner, Field, Input, Modal, PageHeader, Select, Spinner, Tabs } from '../components/ui';
 import { useAuth } from '../contexts/AuthContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../lib/api';
 import { daysUntil, formatDate, ticketState } from '../lib/labels';
@@ -66,6 +67,7 @@ function TicketModal({ initial, workers, ticketTypes, onClose, onSaved }: {
 export default function TrainingPage() {
   const { profile, isLeader, isContractor } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<Partial<WorkerTicket> | null>(null);
   const { data, loading, error, reload } = useAsync(async () => {
@@ -87,7 +89,7 @@ export default function TrainingPage() {
   }, [tickets, data]);
 
   const del = async (t: WorkerTicket) => {
-    if (!window.confirm(`Remove ${t.ticket_type}?`)) return;
+    if (!(await confirm({ title: 'Remove ticket', message: `Remove ${t.ticket_type}?`, confirmLabel: 'Remove', danger: true }))) return;
     try { await api.deleteTicket(t.id); toast('Ticket removed'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
   };
 

@@ -1,4 +1,4 @@
-import { Lock, LogOut, Save } from 'lucide-react';
+import { KeyRound, Lock, LogOut, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Avatar, Badge, Button, Card, ErrorBanner, Field, Input, PageHeader } from '../components/ui';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,6 +7,40 @@ import { api } from '../lib/api';
 import { ROLE_COLOR, ROLE_DESCRIPTION, ROLE_LABEL } from '../lib/labels';
 import type { Profile } from '../lib/types';
 import { errMsg, useAsync } from '../lib/useAsync';
+
+export function PasswordCard({ required }: { required?: boolean }) {
+  const toast = useToast();
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    if (pw.length < 8) return setError('Use at least 8 characters.');
+    if (pw !== pw2) return setError("The passwords don't match.");
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updatePassword(pw);
+      setPw(''); setPw2('');
+      toast('Password updated');
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title={required ? 'Choose your password' : 'Change password'}>
+      {required && <p className="mb-4 text-sm text-steel-600">Your account was set up with a temporary password. Choose your own before you continue.</p>}
+      {error && <ErrorBanner message={error} />}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="New password" hint="At least 8 characters"><Input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+        <Field label="Confirm new password"><Input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>
+      </div>
+      <Button className="mt-4" icon={<KeyRound className="h-5 w-5" />} loading={busy} onClick={save}>{required ? 'Save and continue' : 'Update password'}</Button>
+    </Card>
+  );
+}
 
 export default function ProfilePage() {
   const { profile, refreshProfile, signOut } = useAuth();
@@ -66,6 +100,8 @@ export default function ProfilePage() {
           </div>
           <Button className="mt-4" icon={<Save className="h-5 w-5" />} loading={busy} onClick={save}>Save changes</Button>
         </Card>
+
+        {api.mode === 'supabase' && <PasswordCard />}
 
         <Card title="Access">
           <dl className="grid gap-3 text-sm sm:grid-cols-2">

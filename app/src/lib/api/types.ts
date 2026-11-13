@@ -1,12 +1,33 @@
 import type {
-  AppRole, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
+  AppRole, AppSettings, DirectoryEntry, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
   LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
-  WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger,
+  WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger, RecordApproval, RecordEvent, RecordRow,
 } from '../types';
+
+export interface RecordInput {
+  /** generate client-side so photo uploads can be filed under the record before it is saved */
+  id: string;
+  template_version_id: string;
+  project_id: string | null;
+  answers: Record<string, unknown>;
+  /** 'draft' or 'submitted' (the server picks the real submitted status); leaders editing an
+   *  in-progress record pass its current status to keep it unchanged */
+  status: string;
+  isNew: boolean;
+}
+
+export interface RecordDetail {
+  record: RecordRow;
+  version: FormTemplateVersion;
+  approvals: RecordApproval[];
+  events: RecordEvent[];
+}
 
 export interface Session {
   userId: string;
   email: string;
+  /** Set when a leader created the account with a temporary password. */
+  mustChangePassword?: boolean;
 }
 
 export interface InviteInput {
@@ -15,6 +36,8 @@ export interface InviteInput {
   role: AppRole;
   organization_id: string;
   job_role_id?: string | null;
+  /** Create the account now with this password instead of emailing an invite. */
+  temp_password?: string;
 }
 
 export interface DemoAccount {
@@ -39,6 +62,9 @@ export interface Api {
   signInWithPassword(email: string, password: string): Promise<void>;
   signInWithMagicLink(email: string): Promise<void>;
   sendPasswordReset(email: string): Promise<void>;
+  /** Self sign-up. The very first account becomes the Leader; later ones wait for activation unless invited. */
+  signUp(email: string, password: string, fullName: string): Promise<{ needsConfirmation: boolean }>;
+  updatePassword(password: string): Promise<void>;
   signOut(): Promise<void>;
   demoAccounts?(): DemoAccount[];
   demoSignIn?(userId: string): Promise<void>;
@@ -95,6 +121,26 @@ export interface Api {
   listTickets(): Promise<WorkerTicket[]>;
   saveTicket(t: Partial<WorkerTicket>): Promise<WorkerTicket>;
   deleteTicket(id: string): Promise<void>;
+
+  // records (field modules)
+  listRecords(module?: WorkflowModule): Promise<RecordRow[]>;
+  getRecord(id: string): Promise<RecordDetail | null>;
+  getTemplateVersion(id: string): Promise<FormTemplateVersion | null>;
+  saveRecord(input: RecordInput): Promise<RecordRow>;
+  setRecordStatus(id: string, status: string): Promise<void>;
+  deleteRecord(id: string): Promise<void>;
+  decideApproval(approvalId: string, decision: 'approved' | 'rejected', comment?: string): Promise<void>;
+  addComment(recordId: string, body: string): Promise<void>;
+  /** pending approval steps the current user can act on */
+  listMyPendingApprovals(): Promise<(RecordApproval & { record: RecordRow })[]>;
+  /** turn a stored file reference into a viewable URL */
+  fileUrl(ref: string): Promise<string>;
+  listDirectory(): Promise<DirectoryEntry[]>;
+
+  // branding
+  getSettings(): Promise<AppSettings>;
+  saveSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  uploadLogo(file: File): Promise<string>;
 
   // notifications
   listNotifications(): Promise<Notification[]>;

@@ -32,6 +32,9 @@ export const TEMPLATE_CATEGORY: Record<TemplateCategory, { label: string; color:
   plant_prestart: { label: 'Plant Pre-Start', color: 'orange' },
   risk_assessment: { label: 'Risk Assessment', color: 'purple' },
   safety_event: { label: 'Safety Event', color: 'red' },
+  daily_field_report: { label: 'Daily Field Report', color: 'blue' },
+  timesheet: { label: 'Timesheet', color: 'green' },
+  training: { label: 'Training Record', color: 'slate' },
 };
 
 export const TEMPLATE_STATUS: Record<TemplateStatus, { label: string; color: BadgeColor }> = {
@@ -48,6 +51,7 @@ export const QUESTION_TYPE: Record<QuestionType, { label: string; hint: string }
   dropdown: { label: 'Dropdown', hint: 'Pick one from a list' },
   photo: { label: 'Photo Upload', hint: 'Camera / photo required' },
   signature: { label: 'Digital Signature', hint: 'Sign on screen' },
+  table: { label: 'Table (rows)', hint: 'Crew, plant, hours' },
 };
 
 export const MODULE_LABEL: Record<WorkflowModule, string> = {
@@ -80,25 +84,56 @@ export const OPERATOR_LABEL = {
 } as const;
 
 /** Fields each module exposes for rule conditions (Phase 2 modules will extend). */
+/**
+ * Named fields each module exposes to rule conditions. A dropdown linked to a
+ * lookup list fills its field automatically (severity_levels -> severity); any
+ * question can also be given a field name in the template builder. Rules can
+ * additionally test any individual form question.
+ */
 export const MODULE_FIELDS: Record<WorkflowModule, { key: string; label: string; lookup?: string }[]> = {
   safety_event: [
     { key: 'severity', label: 'Severity', lookup: 'severity_levels' },
     { key: 'event_type', label: 'Event Type', lookup: 'event_types' },
-    { key: 'project_id', label: 'Project' },
+    { key: 'critical_failures', label: 'Critical items failed (count)' },
   ],
   daily_field_report: [
-    { key: 'total_hours', label: 'Total hours' },
+    { key: 'total_hours', label: 'Total crew hours' },
     { key: 'cost_code', label: 'Cost code', lookup: 'cost_codes' },
+    { key: 'critical_failures', label: 'Critical items failed (count)' },
   ],
   plant_prestart: [
     { key: 'plant_category', label: 'Plant category', lookup: 'plant_categories' },
-    { key: 'critical_failures', label: 'Critical failures (count)' },
+    { key: 'critical_failures', label: 'Critical items failed (count)' },
   ],
-  audit: [{ key: 'score', label: 'Score %' }, { key: 'critical_failures', label: 'Critical failures (count)' }],
-  risk_assessment: [{ key: 'residual_risk', label: 'Residual risk score' }, { key: 'hazard_category', label: 'Hazard category', lookup: 'hazard_categories' }],
-  timesheet: [{ key: 'total_hours', label: 'Total hours' }],
+  audit: [{ key: 'score', label: 'Score %' }, { key: 'critical_failures', label: 'Critical items failed (count)' }],
+  risk_assessment: [
+    { key: 'residual_risk', label: 'Residual risk score' },
+    { key: 'hazard_category', label: 'Hazard category', lookup: 'hazard_categories' },
+    { key: 'critical_failures', label: 'Critical items failed (count)' },
+  ],
+  timesheet: [{ key: 'total_hours', label: 'Total hours' }, { key: 'cost_code', label: 'Cost code', lookup: 'cost_codes' }],
   training: [{ key: 'ticket_type', label: 'Ticket type', lookup: 'ticket_types' }],
 };
+
+export const LOOKUP_FIELD: Record<string, string> = {
+  event_types: 'event_type', severity_levels: 'severity', plant_categories: 'plant_category',
+  hazard_categories: 'hazard_category', cost_codes: 'cost_code', ticket_types: 'ticket_type',
+};
+
+/** Field-module routes. Template category == module. */
+export const MODULE_ROUTE: Partial<Record<WorkflowModule, string>> = {
+  safety_event: '/safety',
+  daily_field_report: '/dfr',
+  timesheet: '/timesheets',
+  plant_prestart: '/prestart',
+  risk_assessment: '/risk',
+  audit: '/audits',
+};
+
+export function formatDateTime(d: string | null | undefined) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-AU', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
 
 export function formatDate(d: string | null | undefined) {
   if (!d) return '—';
