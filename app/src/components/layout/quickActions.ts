@@ -1,4 +1,4 @@
-import { CheckSquare, ClipboardCheck, Construction, FileText, GraduationCap, LayoutTemplate, ShieldAlert, ShieldCheck, Target, Truck, UserPlus, Users, type LucideIcon } from 'lucide-react';
+import { CheckSquare, ClipboardCheck, Construction, FileText, GraduationCap, LayoutTemplate, ShieldAlert, ShieldCheck, Target, Truck, Users, type LucideIcon } from 'lucide-react';
 import type { AppRole } from '../../lib/types';
 
 export interface QuickAction {
@@ -14,7 +14,6 @@ const NEW_DFR: QuickAction = { label: 'New Daily Field Report', description: 'Cr
 const PRESTART: QuickAction = { label: 'Vehicle Pre-Start', description: 'Pick your vehicle and check it', to: '/vehicles', icon: Truck, className: 'bg-hivis-500 text-steel-900 hover:bg-hivis-400' };
 const TRAINING: QuickAction = { label: 'My Licences', description: 'Tickets, licences & inductions', to: '/training', icon: GraduationCap, className: 'bg-emerald-700 text-white hover:bg-emerald-800' };
 const CREW: QuickAction = { label: 'My Team', description: 'People and licences on your projects', to: '/people', icon: Users, className: 'bg-emerald-700 text-white hover:bg-emerald-800' };
-const INVITE: QuickAction = { label: 'Add Person', description: 'Staff or subcontractor', to: '/people?add=1', icon: UserPlus, className: 'bg-steel-900 text-white hover:bg-steel-800' };
 const TEMPLATE: QuickAction = { label: 'New Template', description: 'Checklist or form', to: '/admin/templates?new=1', icon: LayoutTemplate, className: 'bg-brand-800 text-white hover:bg-brand-900' };
 const TAKE5: QuickAction = { label: 'Take 5', description: 'Step-back risk check', to: '/risk?new=1', icon: ShieldCheck, className: 'bg-violet-700 text-white hover:bg-violet-800' };
 const APPROVALS: QuickAction = { label: 'Approvals', description: 'Waiting for your decision', to: '/approvals', icon: CheckSquare, className: 'bg-steel-700 text-white hover:bg-steel-800' };
@@ -25,7 +24,7 @@ const AUDIT: QuickAction = { label: 'Start Audit', description: 'Site inspection
 export function quickActionsFor(role: AppRole): QuickAction[] {
   switch (role) {
     case 'admin':
-      return [LOG_EVENT, SCAFFOLDS, APPROVALS, LEADERSHIP, INVITE, TEMPLATE];
+      return [LOG_EVENT, SCAFFOLDS, APPROVALS, LEADERSHIP, PRESTART, TEMPLATE];
     case 'hset':
       return [LOG_EVENT, SCAFFOLDS, APPROVALS, LEADERSHIP, AUDIT, PRESTART];
     case 'project_manager':
