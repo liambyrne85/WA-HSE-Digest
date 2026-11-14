@@ -1,8 +1,9 @@
 import type { Api, DemoAccount, Session } from './types';
 import { buildDemoSeed, type DemoDb } from './demoSeed';
 import { computeSummary, MODULE_PREFIX, nextStatus, resolveSubmitStatus, ruleRecord } from '../recordsLogic';
+import { perthToday } from '../labels';
 import type {
-  FormTemplate, FormTemplateVersion, Invitation, Profile, RecordApproval, RecordRow, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  FormTemplate, FormTemplateVersion, Profile, ProjectMember, RecordApproval, RecordRow, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -10,7 +11,7 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v2';
+const DB_KEY = 'fieldops-demo-db-v3';
 const SESSION_KEY = 'fieldops-demo-session';
 
 const uuid = () =>
@@ -81,19 +82,60 @@ export function createDemoApi(): Api {
     if (!p) throw new Error('Not signed in or account inactive');
     return p;
   };
-  const isLeader = () => me()?.role === 'leader';
-  const isInternal = () => ['leader', 'employee'].includes(me()?.role ?? '');
-  const isContractor = () => me()?.role === 'contractor';
+  // ---- access rules (mirror supabase/migrations/*_people_access.sql) ---------
+  const today = () => perthToday();
+  const orgOf = (p?: Profile) => db.organizations.find((o) => o.id === p?.organization_id);
+  const isAdmin = () => me()?.role === 'admin';
+  const isLeader = () => ['admin', 'hset'].includes(me()?.role ?? '');
+  const isInternal = () => orgOf(me())?.type === 'internal';
+  const isProjectLead = () => ['project_manager', 'supervisor'].includes(me()?.role ?? '');
   const requireLeader = () => {
-    if (!isLeader()) throw new Error('Permission denied: leaders only');
+    if (!isLeader()) throw new Error('Permission denied: Admin or HSET only');
   };
-  const canAccessProject = (pid: string) =>
-    isInternal() || !!db.projects.find((p) => p.id === pid)?.organization_ids?.includes(me()?.organization_id ?? '');
+  const requireAdmin = () => {
+    if (!isAdmin()) throw new Error('Permission denied: Admin only');
+  };
+  const openOn = (mb: ProjectMember, day = today()) => mb.start_date <= day && (!mb.end_date || mb.end_date >= day);
+  const projectIdsFor = (p?: Profile) => {
+    if (!p?.is_active) return [] as string[];
+    return db.members.filter((mb) => mb.profile_id === p.id && openOn(mb)
+      && (['project_manager', 'supervisor'].includes(p.role) || (p.role === 'worker' && mb.is_primary))).map((mb) => mb.project_id);
+  };
+  const myProjectIds = () => projectIdsFor(me());
+  const canAccessProject = (pid: string) => isLeader() || myProjectIds().includes(pid);
+  const canSeePerson = (pid: string) => {
+    const m = me();
+    if (!m) return pid === session?.userId;
+    if (pid === m.id || isLeader()) return true;
+    if (!isProjectLead()) return false;
+    const mine = myProjectIds();
+    const them = db.profiles.find((x) => x.id === pid);
+    return db.members.some((mb) => mb.profile_id === pid && mine.includes(mb.project_id) && (!mb.end_date || mb.end_date >= today()))
+      && (isInternal() || them?.organization_id === m.organization_id);
+  };
+  const personSeesProjectRecord = (p: Profile, projectId: string | null, orgId: string | null) => {
+    if (!p.is_active) return false;
+    if (['admin', 'hset'].includes(p.role)) return true;
+    if (!['project_manager', 'supervisor'].includes(p.role) || !projectId) return false;
+    return db.members.some((mb) => mb.profile_id === p.id && mb.project_id === projectId && openOn(mb))
+      && (orgOf(p)?.type === 'internal' || p.organization_id === orgId);
+  };
   const checkRoleOrg = (role: string, orgId: string) => {
     const o = db.organizations.find((x) => x.id === orgId);
     if (!o) throw new Error('Company not found');
-    if (role === 'contractor' && o.type !== 'contractor') throw new Error('Contractor users must belong to a contractor company');
-    if (role !== 'contractor' && o.type !== 'internal') throw new Error('Leaders and employees must belong to the internal company');
+    if (['admin', 'hset'].includes(role) && o.type !== 'internal') throw new Error('Admin and HSET users must belong to your own company');
+  };
+  const audit = (table: string, id: string, action: 'insert' | 'update', oldData: object | null, newData: object | null) => {
+    let o = oldData as Record<string, unknown> | null;
+    let n = newData as Record<string, unknown> | null;
+    if (action === 'update' && o && n) {
+      const keys = Object.keys(n).filter((k) => k !== 'updated_at' && JSON.stringify(n![k]) !== JSON.stringify(o![k]));
+      if (!keys.length) return;
+      o = Object.fromEntries(keys.map((k) => [k, o![k]]));
+      n = Object.fromEntries(keys.map((k) => [k, n![k]]));
+    }
+    db.audit.unshift({ id: Date.now() + Math.random(), table_name: table, record_id: id, action, changed_by: session?.userId ?? null,
+      changed_at: nowIso(), old_data: o, new_data: n });
   };
 
   // ---- records engine (mirrors the database triggers) ------------------------
@@ -101,9 +143,9 @@ export function createDemoApi(): Api {
   const canSee = (r: RecordRow) => {
     const m = me();
     if (!m) return false;
-    return m.role === 'leader' || r.submitted_by === m.id
-      || (m.role === 'contractor' && r.organization_id === m.organization_id)
-      || db.approvals.some((a) => a.submission_id === r.id && a.status === 'pending' && a.approver_role === m.role);
+    return isLeader() || r.submitted_by === m.id
+      || (isProjectLead() && !!r.project_id && myProjectIds().includes(r.project_id)
+          && (isInternal() || r.organization_id === m.organization_id));
   };
   const logEvent = (submission_id: string, kind: 'created' | 'status' | 'approval_requested' | 'approval' | 'comment',
     extra: { from_status?: string | null; to_status?: string | null; body?: string | null; actor?: string | null } = {}) => {
@@ -127,7 +169,7 @@ export function createDemoApi(): Api {
         if (a.type !== 'in_app') continue;
         const msg = `${rec.reference ? `${rec.reference}: ` : ''}${a.message || r.name}`;
         const targets = db.profiles.filter((p) => p.is_active && a.recipients.some((rc) =>
-          (rc.startsWith('role:') && p.role === rc.slice(5) && (p.role !== 'contractor' || p.organization_id === rec.organization_id))
+          (rc.startsWith('role:') && p.role === rc.slice(5) && personSeesProjectRecord(p, (rec.project_id as string) ?? null, (rec.organization_id as string) ?? null))
           || (rc === 'submitter' && p.id === rec.submitted_by)));
         for (const p of targets) {
           db.notifications.push({ id: uuid(), user_id: p.id, title: r.name, body: msg, link: (rec.link as string) ?? null, read_at: null, created_at: nowIso() });
@@ -173,13 +215,13 @@ export function createDemoApi(): Api {
       const prev = input.isNew ? null : db.records.find((r) => r.id === input.id) ?? null;
       if (!input.isNew) {
         if (!prev || !canSee(prev)) throw new Error('Record not found');
-        if (m.role !== 'leader' && !(prev.submitted_by === m.id && ['draft', 'rejected', 'returned'].includes(prev.status))) {
+        if (!isLeader() && !(prev.submitted_by === m.id && ['draft', 'rejected', 'returned'].includes(prev.status))) {
           throw new Error('This record can no longer be edited');
         }
       }
       const summary = computeSummary(version.schema, input.answers);
       const module = version.category as WorkflowModule;
-      if (m.role !== 'leader' && !['draft', 'submitted'].includes(input.status)) throw new Error(`Only leaders can move a record to "${input.status}"`);
+      if (!isLeader() && !['draft', 'submitted'].includes(input.status)) throw new Error(`Only Admin or HSET can move a record to "${input.status}"`);
       let status: string = input.status;
       let submitted_at = prev?.submitted_at ?? null;
       if (input.status === 'submitted' && (!prev || prev.status !== 'submitted')) {
@@ -212,14 +254,12 @@ export function createDemoApi(): Api {
       commit();
       await delay(null);
     },
-    async deleteRecord(id: string) {
+    async archiveRecord(id: string) {
       const m = requireMe();
       const r = db.records.find((x) => x.id === id);
       if (!r) return;
-      if (!(m.role === 'leader' || (r.submitted_by === m.id && r.status === 'draft'))) throw new Error('Only drafts can be deleted');
+      if (!(isLeader() || (r.submitted_by === m.id && r.status === 'draft'))) throw new Error('Only drafts can be archived');
       db.records = db.records.filter((x) => x.id !== id);
-      db.approvals = db.approvals.filter((x) => x.submission_id !== id);
-      db.events = db.events.filter((x) => x.submission_id !== id);
       commit();
       await delay(null);
     },
@@ -227,7 +267,8 @@ export function createDemoApi(): Api {
       const m = requireMe();
       const a = db.approvals.find((x) => x.id === approvalId);
       if (!a || a.status !== 'pending') throw new Error('This approval step is no longer waiting for a decision');
-      if (!(m.role === 'leader' || (m.role === a.approver_role && (!a.job_role_id || m.job_role_id === a.job_role_id)))) {
+      const rec = db.records.find((x) => x.id === a.submission_id);
+      if (!(isLeader() || (m.role === a.approver_role && !!rec && canSee(rec) && (!a.job_role_id || m.job_role_id === a.job_role_id)))) {
         throw new Error('You are not an approver for this step');
       }
       if (decision === 'rejected' && !comment?.trim()) throw new Error('Add a comment explaining what needs to change');
@@ -265,7 +306,7 @@ export function createDemoApi(): Api {
       const m = me();
       if (!m) return delay([]);
       return delay(db.approvals
-        .filter((a) => a.status === 'pending' && (m.role === 'leader' || a.approver_role === m.role))
+        .filter((a) => a.status === 'pending' && (isLeader() || a.approver_role === m.role))
         .map((a) => ({ ...a, record: db.records.find((r) => r.id === a.submission_id)! }))
         .filter((a) => a.record) as (RecordApproval & { record: RecordRow })[]);
     },
@@ -273,20 +314,21 @@ export function createDemoApi(): Api {
     async listDirectory() {
       const m = me();
       if (!m) return delay([]);
-      return delay(db.profiles.filter((p) => m.role === 'leader'
-        || (p.is_active && m.role === 'employee' && p.role !== 'contractor')
-        || (p.is_active && m.role === 'contractor' && p.organization_id === m.organization_id))
+      const myOpen = db.members.filter((mb) => mb.profile_id === m.id && (!mb.end_date || mb.end_date >= today())).map((mb) => mb.project_id);
+      return delay(db.profiles.filter((p) => isLeader() || canSeePerson(p.id)
+        || (p.is_active && db.members.some((mb) => mb.profile_id === p.id && myOpen.includes(mb.project_id) && (!mb.end_date || mb.end_date >= today()))
+            && (isInternal() || p.organization_id === m.organization_id)))
         .map(({ id, full_name, role, organization_id }) => ({ id, full_name, role, organization_id })));
     },
     async getSettings() { return delay(db.settings); },
     async saveSettings(patch: Partial<DemoDb['settings']>) {
-      requireLeader();
+      requireAdmin();
       db.settings = { ...db.settings, ...patch };
       commit();
       return delay(db.settings);
     },
     async uploadLogo(file: File) {
-      requireLeader();
+      requireAdmin();
       return new Promise<string>((res, rej) => {
         const r = new FileReader();
         r.onload = () => res(r.result as string);
@@ -303,22 +345,23 @@ export function createDemoApi(): Api {
     const mk = (uid: string, cat: string, project: string | null, answers: Record<string, unknown>) => asUser(uid, () => {
       void recordsApi.saveRecord({ id: uuid(), template_version_id: ver(cat).id, project_id: project, answers, status: 'submitted', isNew: true });
     });
-    mk('u-emp', 'safety_event', 'p-1', { 'q-type': 'Near Miss', 'q-sev': 'High', 'q-desc': 'Light vehicle entered excavator swing radius while loading trucks. No contact.', 'q-made-safe': 'yes', 'q-actions': 'Stopped work, re-briefed spotter, exclusion zone re-marked with bunting.' });
+    mk('u-emp', 'safety_event', 'p-1', { 'q-type': 'Near Miss', 'q-sev': 'High', 'q-desc': 'Scaffold tube dropped from lift 4 into the exclusion zone below the wharf deck. Nobody in the drop zone.', 'q-made-safe': 'yes', 'q-actions': 'Stopped work, checked toeboards and mesh on lift 4, re-briefed crew on tool tethering.' });
     mk('u-acme1', 'daily_field_report', 'p-1', { 'q-shift': 'Day', 'q-weather': 'Hot (over 35°C)',
-      'q-crew': [{ name: 'Alice Nguyen', role: 'Supervisor', hours: '10' }, { name: 'Tom Walsh', role: 'Operator', hours: '10' }, { name: 'Ravi Patel', role: 'Labourer', hours: '9.5' }],
-      'q-plant': [{ plant: 'EX-12 30t excavator', plant_hours: '8' }], 'q-work': 'Bulk cut ch 1200–1350, 1,800 m³ to fill.', 'q-incidents': 'no' });
+      'q-crew': [{ name: 'Alice Nguyen', role: 'Supervisor', hours: '10' }, { name: 'Ravi Patel', role: 'Scaffolder', hours: '10' }],
+      'q-plant': [{ plant: 'HIAB-03 truck', plant_hours: '3' }], 'q-work': 'Erected hung scaffold bays 12–16 under berth 3. Handover inspection booked.', 'q-incidents': 'no' });
     mk('u-acme1', 'plant_prestart', 'p-2', { 'q-plant': 'Excavator', 'q-fleet': 'EX-12', 'q-hours': '4521', 'q-fluids': 'pass', 'q-leaks': 'pass', 'q-tracks': 'pass', 'q-glass': 'pass',
       'q-seatbelt': 'pass', 'q-alarm': 'fail', 'q-brakes': 'pass', 'q-fire': 'yes', 'q-fit': 'yes' });
-    db.notifications = db.notifications.filter((n) => !n.body?.match(/^(SE|DFR|PS)-/) || n.user_id === 'u-leader');
+    db.notifications = db.notifications.filter((n) => !n.body?.match(/^(SE|DFR|PS)-/) || ['u-admin', 'u-hset'].includes(n.user_id));
     commit();
   }
 
   const accounts: DemoAccount[] = [
-    { id: 'u-leader', label: 'Sam Carter', role: 'leader', description: 'Project Manager · Access & Site (Leader)' },
-    { id: 'u-emp', label: 'Jordan Reid', role: 'employee', description: 'Plant Operator · Access & Site (Employee)' },
-    { id: 'u-acme1', label: 'Alice Nguyen', role: 'contractor', description: 'Supervisor · Acme Earthworks (Contractor)' },
-    { id: 'u-bravo1', label: 'Ben Hughes', role: 'contractor', description: 'Supervisor · Bravo Traffic Mgmt (Contractor)' },
-    { id: 'u-pending', label: 'Casey Morgan', role: 'employee', description: 'Self-registered, awaiting activation' },
+    { id: 'u-admin', label: 'Sam Carter', role: 'admin', description: 'Admin · sees everything, manages people' },
+    { id: 'u-hset', label: 'Priya Shah', role: 'hset', description: 'HSET Advisor · sees everything' },
+    { id: 'u-pm', label: 'Daniel Kerr', role: 'project_manager', description: 'Project Manager · Port Hedland & Karratha' },
+    { id: 'u-acme1', label: 'Alice Nguyen', role: 'supervisor', description: 'Supervisor · Acme Scaffolding (subcontractor)' },
+    { id: 'u-emp', label: 'Jordan Reid', role: 'worker', description: 'Scaffolder · Port Hedland' },
+    { id: 'u-pending', label: 'Casey Morgan', role: 'worker', description: 'Signed up, waiting for an Admin to activate' },
   ];
 
   const api: Api = {
@@ -368,25 +411,24 @@ export function createDemoApi(): Api {
     async listProfiles() {
       const m = me();
       if (!m) return delay(db.profiles.filter((p) => p.id === session?.userId));
-      return delay(db.profiles
-        .filter((p) => p.id === m.id || m.role === 'leader' || (m.role === 'contractor' && p.organization_id === m.organization_id))
-        .sort((a, b) => a.full_name.localeCompare(b.full_name)));
+      return delay(db.profiles.filter((p) => canSeePerson(p.id)).sort((a, b) => a.full_name.localeCompare(b.full_name)));
     },
     async updateProfile(id, patch) {
       const m = requireMe();
       const p = db.profiles.find((x) => x.id === id);
       if (!p) throw new Error('Profile not found');
-      if (m.role !== 'leader') {
+      if (!isAdmin()) {
         if (id !== m.id) throw new Error('Permission denied');
-        const locked: (keyof Profile)[] = ['role', 'organization_id', 'job_role_id', 'employee_number', 'is_active', 'email'];
-        for (const k of locked) if (k in patch && patch[k] !== p[k]) throw new Error('Only leaders can change role, company, job role or account status');
+        const locked: (keyof Profile)[] = ['role', 'organization_id', 'job_role_id', 'employee_number', 'start_date', 'is_scaffold_inspector', 'is_active', 'email'];
+        for (const k of locked) if (k in patch && patch[k] !== p[k]) throw new Error('Only admins can change role, company, position, employee ID, start date, inspector status or account status');
       }
       const next = { ...p, ...patch };
       checkRoleOrg(next.role, next.organization_id);
-      if (p.role === 'leader' && p.is_active && (next.role !== 'leader' || !next.is_active)
-        && !db.profiles.some((x) => x.id !== p.id && x.role === 'leader' && x.is_active)) {
-        throw new Error('Cannot remove the last active leader');
+      if (p.role === 'admin' && p.is_active && (next.role !== 'admin' || !next.is_active)
+        && !db.profiles.some((x) => x.id !== p.id && x.role === 'admin' && x.is_active)) {
+        throw new Error('Cannot remove the last active admin');
       }
+      audit('profiles', p.id, 'update', { ...p }, next);
       Object.assign(p, next);
       commit();
       return delay(p);
@@ -394,10 +436,10 @@ export function createDemoApi(): Api {
     async listOrganizations() {
       const m = me();
       if (!m) return delay([]);
-      return delay(db.organizations.filter((o) => isInternal() || o.id === m.organization_id));
+      return delay(db.organizations.filter((o) => isLeader() || isInternal() || o.id === m.organization_id));
     },
     async saveOrganization(o) {
-      requireLeader();
+      requireAdmin();
       if (o.id) {
         const ex = db.organizations.find((x) => x.id === o.id)!;
         if (o.type && o.type !== ex.type && db.profiles.some((p) => p.organization_id === ex.id)) {
@@ -420,47 +462,109 @@ export function createDemoApi(): Api {
       return delay(row);
     },
 
-    // ---- invitations -----------------------------------------------------
+    // ---- people (admin) ----------------------------------------------------
     async listInvitations() {
-      if (!isLeader()) return delay([]);
+      if (!isAdmin()) return delay([]);
       return delay([...db.invitations].sort((a, b) => b.created_at.localeCompare(a.created_at)));
     },
-    async inviteUser(input) {
-      requireLeader();
+    async createPerson(input, _sendInvite) {
+      requireAdmin();
       const email = input.email.trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Valid email required');
-      if (db.profiles.some((p) => p.email.toLowerCase() === email)) throw new Error('A user with this email already exists');
+      if (!input.full_name?.trim()) throw new Error('Full name required');
+      if (db.profiles.some((p) => p.email.toLowerCase() === email)) throw new Error('A person with this email already exists');
       checkRoleOrg(input.role, input.organization_id);
-      db.invitations.forEach((i) => { if (i.email === email && i.status === 'pending') i.status = 'revoked'; });
-      const inv = {
-        id: uuid(), email, full_name: input.full_name ?? null, role: input.role, organization_id: input.organization_id,
-        job_role_id: input.job_role_id ?? null, status: 'pending' as Invitation['status'], invited_by: session!.userId,
-        expires_at: new Date(Date.now() + 14 * 864e5).toISOString(), created_at: nowIso(),
+      const id = uuid();
+      const row: Profile = {
+        id, email, full_name: input.full_name.trim(), role: input.role, organization_id: input.organization_id,
+        job_role_id: input.job_role_id ?? null, phone: input.phone ?? null, employee_number: input.employee_number ?? null,
+        start_date: input.start_date ?? null, is_scaffold_inspector: !!input.is_scaffold_inspector,
+        emergency_contact_name: null, emergency_contact_phone: null, is_active: true, last_seen_at: null, created_at: nowIso(),
       };
-      db.invitations.push(inv);
-      if (input.temp_password) {
-        // Mirror the server: the account exists immediately.
-        inv.status = 'accepted';
-        db.profiles.push({
-          id: uuid(), email, full_name: input.full_name || email.split('@')[0]!, role: input.role,
-          organization_id: input.organization_id, job_role_id: input.job_role_id ?? null, phone: null,
-          employee_number: null, emergency_contact_name: null, emergency_contact_phone: null, is_active: true, created_at: nowIso(),
-        });
+      db.profiles.push(row);
+      audit('profiles', id, 'insert', null, row);
+      if (input.primary_project_id) {
+        const mb: ProjectMember = { id: uuid(), profile_id: id, project_id: input.primary_project_id, is_primary: true,
+          start_date: input.start_date ?? today(), end_date: null, created_at: nowIso() };
+        db.members.push(mb);
+        audit('project_members', mb.id, 'insert', null, mb);
       }
       commit();
-      return delay(inv);
+      return delay({ profile_id: id, invited: false });
     },
-    async resendInvitation(id) {
-      requireLeader();
-      const i = db.invitations.find((x) => x.id === id);
-      if (i) { i.expires_at = new Date(Date.now() + 14 * 864e5).toISOString(); i.status = 'pending'; commit(); }
-      await delay(null);
+    async importPeople(rows, sendInvites) {
+      requireAdmin();
+      const results = [];
+      for (const [i, row] of rows.entries()) {
+        try {
+          const r = await api.createPerson(row, sendInvites);
+          results.push({ row: i + 1, email: row.email, ok: true, profile_id: r.profile_id, invited: false });
+        } catch (e) {
+          results.push({ row: i + 1, email: row.email, ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return results;
     },
-    async revokeInvitation(id) {
-      requireLeader();
-      const i = db.invitations.find((x) => x.id === id);
-      if (i && i.status === 'pending') { i.status = 'revoked'; commit(); }
-      await delay(null);
+    async sendInvite() {
+      requireAdmin();
+      await delay(null); // demo: no email is sent
+    },
+    async setPersonActive(profileId, active) {
+      requireAdmin();
+      if (profileId === session?.userId && !active) throw new Error("You can't deactivate yourself");
+      await api.updateProfile(profileId, { is_active: active });
+    },
+    async touchLastSeen() {
+      const p = db.profiles.find((x) => x.id === session?.userId);
+      if (p) { p.last_seen_at = nowIso(); commit(); }
+    },
+    async listProjectMembers(filter) {
+      if (!me()) return delay([]);
+      return delay(db.members.filter((mb) => (mb.profile_id === session?.userId || canSeePerson(mb.profile_id))
+        && (!filter?.profileId || mb.profile_id === filter.profileId)
+        && (!filter?.projectId || mb.project_id === filter.projectId))
+        .sort((a, b) => b.start_date.localeCompare(a.start_date)));
+    },
+    async saveProjectMember(m) {
+      requireAdmin();
+      if (m.id) {
+        const ex = db.members.find((x) => x.id === m.id);
+        if (!ex) throw new Error('Assignment not found');
+        const next = { ...ex, ...m, project_id: ex.project_id, profile_id: ex.profile_id };
+        if (next.end_date && next.end_date < next.start_date) throw new Error('End date is before the start date');
+        audit('project_members', ex.id, 'update', { ...ex }, next);
+        Object.assign(ex, next);
+        if (ex.is_primary && !ex.end_date) db.members.forEach((x) => { if (x.profile_id === ex.profile_id && x.id !== ex.id && !x.end_date) x.is_primary = false; });
+        commit();
+        return delay(ex);
+      }
+      if (!m.project_id || !m.profile_id) throw new Error('Project and person are required');
+      if (db.members.some((x) => x.profile_id === m.profile_id && x.project_id === m.project_id && !x.end_date)) {
+        throw new Error('This person is already assigned to that project');
+      }
+      const row: ProjectMember = { id: uuid(), project_id: m.project_id, profile_id: m.profile_id, is_primary: !!m.is_primary,
+        start_date: m.start_date ?? today(), end_date: m.end_date ?? null, created_at: nowIso() };
+      if (row.is_primary) db.members.forEach((x) => { if (x.profile_id === row.profile_id && !x.end_date) x.is_primary = false; });
+      db.members.push(row);
+      audit('project_members', row.id, 'insert', null, row);
+      commit();
+      return delay(row);
+    },
+    async listAudit(table, recordId) {
+      const m = me();
+      if (!m) return delay([]);
+      if (!isLeader() && !(table === 'profiles' && recordId === m.id)) return delay([]);
+      return delay(db.audit.filter((a) => a.table_name === table && a.record_id === recordId));
+    },
+    async uploadPersonFile(profileId, file) {
+      const m = requireMe();
+      if (!(isLeader() || profileId === m.id)) throw new Error('Permission denied');
+      return new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result as string);
+        r.onerror = () => rej(new Error('Could not read the file'));
+        r.readAsDataURL(file);
+      });
     },
 
     // ---- job roles -------------------------------------------------------
@@ -469,7 +573,7 @@ export function createDemoApi(): Api {
       return delay([...db.jobRoles].sort((a, b) => a.name.localeCompare(b.name)));
     },
     async saveJobRole(r) {
-      requireLeader();
+      requireAdmin();
       if (r.id) {
         const ex = db.jobRoles.find((x) => x.id === r.id)!;
         Object.assign(ex, r);
@@ -484,10 +588,10 @@ export function createDemoApi(): Api {
       return delay(row);
     },
     async listJobRoleRates() {
-      return delay(isLeader() ? db.rates : []);
+      return delay(isAdmin() ? db.rates : []);
     },
     async saveJobRoleRate(rate) {
-      requireLeader();
+      requireAdmin();
       const ex = db.rates.find((x) => x.job_role_id === rate.job_role_id);
       if (ex) Object.assign(ex, rate); else db.rates.push(rate);
       commit();
@@ -560,19 +664,12 @@ export function createDemoApi(): Api {
       commit();
       return delay(row);
     },
-    async deleteLookupValue(id) {
-      requireLeader();
-      db.lookupValues = db.lookupValues.filter((x) => x.id !== id);
-      commit();
-      await delay(null);
-    },
-
     // ---- templates -------------------------------------------------------
     async listTemplates() {
       const m = me();
       if (!m) return delay([]);
       return delay(db.templates
-        .filter((t) => m.role === 'leader' || (t.status === 'published' && (isInternal() || t.available_to_contractors)))
+        .filter((t) => isLeader() || (t.status === 'published' && (isInternal() || t.available_to_contractors)))
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
     },
     async getTemplate(id) {
@@ -644,7 +741,7 @@ export function createDemoApi(): Api {
       await delay(null);
     },
     async listRules() {
-      return delay(isLeader() ? [...db.rules].sort((a, b) => a.module.localeCompare(b.module) || a.priority - b.priority) : []);
+      return delay(isLeader() ? [...db.rules].filter((x) => !(x as WorkflowRule & { archived_at?: string }).archived_at).sort((a, b) => a.module.localeCompare(b.module) || a.priority - b.priority) : []);
     },
     async saveRule(r) {
       requireLeader();
@@ -664,9 +761,10 @@ export function createDemoApi(): Api {
       commit();
       return delay(row);
     },
-    async deleteRule(id) {
+    async archiveRule(id) {
       requireLeader();
-      db.rules = db.rules.filter((x) => x.id !== id);
+      const ex = db.rules.find((x) => x.id === id);
+      if (ex) Object.assign(ex, { is_enabled: false, archived_at: nowIso() });
       commit();
       await delay(null);
     },
@@ -679,41 +777,41 @@ export function createDemoApi(): Api {
 
     // ---- tickets ---------------------------------------------------------
     async listTickets() {
-      const m = me();
-      if (!m) return delay([]);
-      return delay(db.tickets.filter((t) => t.profile_id === m.id || m.role === 'leader'
-        || (m.role === 'contractor' && t.organization_id === m.organization_id)));
+      if (!me()) return delay([]);
+      return delay(db.tickets.filter((t) => !t.archived_at && canSeePerson(t.profile_id)));
     },
     async saveTicket(t) {
       const m = requireMe();
       const worker = db.profiles.find((p) => p.id === t.profile_id);
-      if (!worker) throw new Error('Worker not found');
-      const allowed = worker.id === m.id || m.role === 'leader'
-        || (m.role === 'contractor' && worker.organization_id === m.organization_id);
-      if (!allowed) throw new Error('Permission denied');
+      if (!worker) throw new Error('Person not found');
+      if (!(worker.id === m.id || isLeader())) throw new Error('Only the person themselves, Admin or HSET can change licences');
       if (t.id) {
         const ex = db.tickets.find((x) => x.id === t.id)!;
-        Object.assign(ex, t, { organization_id: worker.organization_id });
+        const next = { ...ex, ...t, organization_id: worker.organization_id };
+        if (!isLeader()) { next.verified_at = ex.verified_at; }
+        audit('worker_tickets', ex.id, 'update', { ...ex }, next);
+        Object.assign(ex, next);
         commit();
         return delay(ex);
       }
       const row = {
         id: uuid(), profile_id: worker.id, organization_id: worker.organization_id, ticket_type: t.ticket_type ?? '',
-        ticket_number: t.ticket_number ?? null, issuer: t.issuer ?? null, issued_on: t.issued_on ?? null,
-        expires_on: t.expires_on ?? null, verified_at: m.role === 'leader' ? nowIso() : null, created_at: nowIso(),
+        licence_class: t.licence_class ?? null, ticket_number: t.ticket_number ?? null, issuer: t.issuer ?? null,
+        issued_on: t.issued_on ?? null, expires_on: t.expires_on ?? null, file_path: t.file_path ?? null,
+        verified_at: isLeader() ? nowIso() : null, archived_at: null, created_at: nowIso(),
       };
       db.tickets.push(row);
+      audit('worker_tickets', row.id, 'insert', null, row);
       commit();
       return delay(row);
     },
-    async deleteTicket(id) {
+    async archiveTicket(id) {
       const m = requireMe();
       const t = db.tickets.find((x) => x.id === id);
       if (!t) return;
-      if (!(t.profile_id === m.id || m.role === 'leader' || (isContractor() && t.organization_id === m.organization_id))) {
-        throw new Error('Permission denied');
-      }
-      db.tickets = db.tickets.filter((x) => x.id !== id);
+      if (!(t.profile_id === m.id || isLeader())) throw new Error('Permission denied');
+      t.archived_at = nowIso();
+      audit('worker_tickets', t.id, 'update', { archived_at: null }, { archived_at: t.archived_at });
       commit();
       await delay(null);
     },

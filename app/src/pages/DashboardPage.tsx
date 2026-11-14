@@ -18,7 +18,8 @@ function greeting() {
 }
 
 export default function DashboardPage() {
-  const { profile, role, isLeader, isContractor } = useAuth();
+  const { profile, role, isLeader, isProjectLead, isWorker, isContractor } = useAuth();
+  const isLead = isProjectLead;
 
   const { data } = useAsync(async () => {
     const [projects, tickets, profiles, templates, rules, invitations, orgs, records, approvals, pipelines] = await Promise.all([
@@ -38,7 +39,7 @@ export default function DashboardPage() {
 
   const activeProjects = data?.projects.filter((p) => p.is_active && p.status === 'active') ?? [];
   const myTickets = data?.tickets.filter((t) => t.profile_id === profile?.id) ?? [];
-  const relevantTickets = isLeader || isContractor ? data?.tickets ?? [] : myTickets;
+  const relevantTickets = isLeader || isLead ? data?.tickets ?? [] : myTickets;
   const expiring = relevantTickets.filter((t) => { const d = daysUntil(t.expires_on); return d !== null && d <= 30; });
   const myOrg = data?.orgs.find((o) => o.id === profile?.organization_id);
   const actions = quickActionsFor(role!);
@@ -65,8 +66,9 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-1 text-sm text-white/85">
             {isLeader && 'Here\'s what needs your attention across all sites and contractors.'}
-            {role === 'employee' && 'Log your records, check your tickets and stay safe out there.'}
-            {isContractor && <>Signed in for <span className="font-bold text-white">{myOrg?.name}</span> — you only see your own company's data.</>}
+            {isLead && 'Here’s what’s happening on your projects.'}
+            {isWorker && 'Log your records, check your licences and stay safe out there.'}
+            {isContractor && <> Signed in for <span className="font-bold text-white">{myOrg?.name}</span>.</>}
           </p>
         </div>
       </div>
@@ -106,14 +108,14 @@ export default function DashboardPage() {
               hint={`${data?.templates.filter((t) => t.has_unpublished_changes).length ?? 0} with unpublished changes`} />
             <StatCard label="Active workflow rules" value={data?.rules.filter((r) => r.is_enabled).length ?? '–'} tone="slate" icon={<Workflow className="h-5 w-5" />} hint={`${data?.rules.length ?? 0} configured`} />
           </>}
-          {role === 'employee' && <>
+          {isWorker && <>
             <StatCard label="My open records" value={data ? mine.filter((r) => r.status !== 'draft' && !terminal(r.module, r.status)).length : '–'} tone="amber" icon={<ClipboardList className="h-5 w-5" />}
               hint={`${mine.filter((r) => r.status === 'draft').length} drafts · ${mine.filter((r) => ['rejected', 'returned'].includes(r.status)).length} returned`} />
             <StatCard label="My pre-starts today" value={data ? mine.filter((r) => r.module === 'plant_prestart' && new Date(r.created_at).toDateString() === today).length : '–'} tone="orange" icon={<Truck className="h-5 w-5" />} />
             <StatCard label="My tickets" value={myTickets.length} tone="green" icon={<GraduationCap className="h-5 w-5" />} hint={expiring.length ? `${expiring.length} expiring soon` : 'All current'} />
             <StatCard label="Active projects" value={activeProjects.length} tone="blue" icon={<MapPin className="h-5 w-5" />} />
           </>}
-          {isContractor && <>
+          {isLead && <>
             <StatCard label="Crew members" value={data?.profiles.filter((p) => p.is_active).length ?? '–'} tone="blue" icon={<Users className="h-5 w-5" />} hint={myOrg?.name} />
             <StatCard label="Crew tickets expiring" value={expiring.length} tone={expiring.length ? 'red' : 'green'} icon={<GraduationCap className="h-5 w-5" />} hint="Expired or ≤30 days" />
             <StatCard label="DFRs this week" value={data ? records.filter((r) => r.module === 'daily_field_report' && r.status !== 'draft' && new Date(r.created_at).getTime() > weekAgo).length : '–'} tone="orange" icon={<FileText className="h-5 w-5" />}
@@ -124,7 +126,7 @@ export default function DashboardPage() {
       </section>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card title={isContractor ? 'Your sites' : 'Active projects'} padded={false}
+        <Card title={isLeader ? 'Active projects' : 'Your projects'} padded={false}
           actions={<Link to="/projects" className="flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">All <ArrowRight className="h-4 w-4" /></Link>}>
           <ul className="divide-y divide-steel-100">
             {activeProjects.slice(0, 5).map((p) => (
@@ -136,30 +138,30 @@ export default function DashboardPage() {
                 <Badge color={PROJECT_STATUS[p.status].color}>{PROJECT_STATUS[p.status].label}</Badge>
               </li>
             ))}
-            {data && !activeProjects.length && <li className="px-4 py-8 text-center text-sm text-steel-500">No active projects{isContractor ? ' assigned to your company yet' : ''}.</li>}
+            {data && !activeProjects.length && <li className="px-4 py-8 text-center text-sm text-steel-500">No active projects{isLeader ? '' : ' assigned to you yet'}.</li>}
           </ul>
         </Card>
 
-        <Card title={isLeader ? 'Tickets needing attention' : isContractor ? 'Crew tickets needing attention' : 'My tickets'} padded={false}
+        <Card title={isLeader ? 'Licences needing attention' : isLead ? 'Team licences needing attention' : 'My licences'} padded={false}
           actions={<Link to="/training" className="flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">Open <ArrowRight className="h-4 w-4" /></Link>}>
           <ul className="divide-y divide-steel-100">
-            {(isLeader || isContractor ? expiring : myTickets).slice(0, 6).map((t) => {
+            {(isLeader || isLead ? expiring : myTickets).slice(0, 6).map((t) => {
               const st = ticketState(t.expires_on);
               return (
                 <li key={t.id} className="flex items-center justify-between gap-3 px-4 py-3">
                   <div className="min-w-0">
                     <p className="truncate font-bold text-steel-900">{t.ticket_type}</p>
                     <p className="truncate text-xs text-steel-500">
-                      {(isLeader || isContractor) && <>{nameOf(t.profile_id)} · </>}Expires {formatDate(t.expires_on)}
+                      {(isLeader || isLead) && <>{nameOf(t.profile_id)} · </>}Expires {formatDate(t.expires_on)}
                     </p>
                   </div>
                   <Badge color={st.color}>{st.label}</Badge>
                 </li>
               );
             })}
-            {data && (isLeader || isContractor ? expiring : myTickets).length === 0 && (
+            {data && (isLeader || isLead ? expiring : myTickets).length === 0 && (
               <li className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-steel-500">
-                {isLeader || isContractor ? 'Nothing expiring in the next 30 days.' : <>No tickets recorded. <Link className="font-semibold text-brand-700" to="/training">Add one</Link></>}
+                {isLeader || isLead ? 'Nothing expiring in the next 30 days.' : <>No tickets recorded. <Link className="font-semibold text-brand-700" to="/training">Add one</Link></>}
               </li>
             )}
           </ul>

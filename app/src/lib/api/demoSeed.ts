@@ -1,5 +1,5 @@
 import type {
-  AppSettings, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
+  AppSettings, AuditEntry, ProjectMember, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, TemplateSchema, WorkerTicket, WorkflowPipeline, WorkflowRule,
 } from '../types';
 
@@ -23,6 +23,8 @@ export interface DemoDb {
   events: RecordEvent[];
   counters: Partial<Record<WorkflowModule, number>>;
   settings: AppSettings;
+  members: ProjectMember[];
+  audit: AuditEntry[];
 }
 
 const now = new Date().toISOString();
@@ -44,7 +46,11 @@ const jr = (id: string, name: string, classification: string, applies_to: JobRol
 const person = (id: string, full_name: string, email: string, role: Profile['role'], organization_id: string,
   job_role_id: string | null, extra: Partial<Profile> = {}): Profile => ({
   id, full_name, email, role, organization_id, job_role_id, phone: null, employee_number: null,
-  emergency_contact_name: null, emergency_contact_phone: null, is_active: true, created_at: now, ...extra,
+  emergency_contact_name: null, emergency_contact_phone: null, start_date: null, is_scaffold_inspector: false,
+  is_active: true, created_at: now, ...extra,
+});
+const member = (id: string, profile_id: string, project_id: string, is_primary: boolean, start = '2026-02-02', end: string | null = null): ProjectMember => ({
+  id, profile_id, project_id, is_primary, start_date: start, end_date: end, created_at: now,
 });
 
 const lv = (list_key: string, labels: string[], codes?: (string | null)[]): LookupValue[] =>
@@ -208,17 +214,17 @@ STARTER_TEMPLATES.push(
 
 export function buildDemoSeed(): DemoDb {
   const jobRoles = [
-    jr('jr-pm', 'Project Manager', 'Management', ['internal']),
-    jr('jr-ss', 'Site Supervisor', 'Supervision', ['internal', 'contractor']),
-    jr('jr-hseq', 'HSEQ Advisor', 'HSEQ', ['internal']),
-    jr('jr-lh', 'Leading Hand', 'Level 4', ['internal', 'contractor']),
-    jr('jr-op', 'Plant Operator', 'Level 3', ['internal', 'contractor']),
+    jr('jr-scaf', 'Scaffolder', 'Trade', ['internal', 'contractor']),
     jr('jr-lab', 'Labourer', 'Level 1', ['internal', 'contractor']),
-    jr('jr-td', 'Truck Driver', 'Level 2', ['internal', 'contractor']),
+    jr('jr-lh', 'Leading Hand', 'Level 4', ['internal', 'contractor']),
+    jr('jr-sup', 'Supervisor', 'Supervision', ['internal', 'contractor']),
+    jr('jr-op', 'Plant Operator', 'Level 3', ['internal', 'contractor']),
+    jr('jr-pm', 'Project Manager', 'Management', ['internal', 'contractor']),
+    jr('jr-hset', 'HSET Advisor', 'HSET', ['internal']),
   ];
   const rateTable: Record<string, [number, number]> = {
-    'jr-pm': [110, 185], 'jr-ss': [85, 145], 'jr-hseq': [80, 140], 'jr-lh': [62, 105],
-    'jr-op': [58, 98], 'jr-lab': [45, 78], 'jr-td': [52, 88],
+    'jr-scaf': [62, 105], 'jr-lab': [45, 78], 'jr-lh': [66, 112], 'jr-sup': [85, 145],
+    'jr-op': [58, 98], 'jr-pm': [110, 185], 'jr-hset': [80, 140],
   };
 
   const templates: FormTemplate[] = [];
@@ -233,38 +239,37 @@ export function buildDemoSeed(): DemoDb {
     });
     versions.push({
       id: vid, template_id: id, version: 1, name: t.name, category: t.category,
-      schema: structuredClone(t.schema), change_note: 'Initial starter template', published_by: 'u-leader', published_at: now,
+      schema: structuredClone(t.schema), change_note: 'Initial starter template', published_by: 'u-admin', published_at: now,
     });
   });
 
   return {
     organizations: [
-      org(ORG_INTERNAL, 'Access & Site Services', 'internal', { abn: '12 345 678 901', contact_email: 'hseq@accesssite.example' }),
-      org(ORG_ACME, 'Acme Earthworks Pty Ltd', 'contractor', { abn: '98 765 432 100', contact_name: 'Alice Nguyen', contact_email: 'alice@acme.example', contact_phone: '0412 555 101' }),
-      org(ORG_BRAVO, 'Bravo Traffic Management', 'contractor', { contact_name: 'Ben Hughes', contact_email: 'ben@bravo.example', contact_phone: '0412 555 202' }),
+      org(ORG_INTERNAL, 'Access & Site Services', 'internal', { abn: '12 345 678 901', contact_email: 'hset@accesssite.example' }),
+      org(ORG_ACME, 'Acme Scaffolding Pty Ltd', 'contractor', { abn: '98 765 432 100', contact_name: 'Alice Nguyen', contact_email: 'alice@acme.example', contact_phone: '0412 555 101' }),
+      org(ORG_BRAVO, 'Bravo Access Services', 'contractor', { contact_name: 'Ben Hughes', contact_email: 'ben@bravo.example', contact_phone: '0412 555 202' }),
     ],
     profiles: [
-      person('u-leader', 'Sam Carter', 'sam.carter@accesssite.example', 'leader', ORG_INTERNAL, 'jr-pm', { phone: '0400 111 222', employee_number: 'E-1001' }),
-      person('u-hseq', 'Priya Shah', 'priya.shah@accesssite.example', 'leader', ORG_INTERNAL, 'jr-hseq', { employee_number: 'E-1002' }),
-      person('u-emp', 'Jordan Reid', 'jordan.reid@accesssite.example', 'employee', ORG_INTERNAL, 'jr-op', { phone: '0400 333 444', employee_number: 'E-1040', emergency_contact_name: 'Kim Reid', emergency_contact_phone: '0400 999 000' }),
-      person('u-emp2', 'Mia Thompson', 'mia.thompson@accesssite.example', 'employee', ORG_INTERNAL, 'jr-lh', { employee_number: 'E-1051' }),
-      person('u-acme1', 'Alice Nguyen', 'alice@acme.example', 'contractor', ORG_ACME, 'jr-ss', { phone: '0412 555 101' }),
-      person('u-acme2', 'Tom Walsh', 'tom@acme.example', 'contractor', ORG_ACME, 'jr-op'),
-      person('u-acme3', 'Ravi Patel', 'ravi@acme.example', 'contractor', ORG_ACME, 'jr-lab'),
-      person('u-bravo1', 'Ben Hughes', 'ben@bravo.example', 'contractor', ORG_BRAVO, 'jr-ss'),
-      person('u-pending', 'Casey Morgan', 'casey.morgan@gmail.example', 'employee', ORG_INTERNAL, null, { is_active: false }),
+      person('u-admin', 'Sam Carter', 'sam.carter@accesssite.example', 'admin', ORG_INTERNAL, 'jr-pm', { phone: '0400 111 222', employee_number: 'E-1001', start_date: '2019-07-01' }),
+      person('u-hset', 'Priya Shah', 'priya.shah@accesssite.example', 'hset', ORG_INTERNAL, 'jr-hset', { phone: '0400 111 333', employee_number: 'E-1002', start_date: '2021-02-15' }),
+      person('u-pm', 'Daniel Kerr', 'daniel.kerr@accesssite.example', 'project_manager', ORG_INTERNAL, 'jr-pm', { phone: '0400 222 111', employee_number: 'E-1010', start_date: '2020-03-02' }),
+      person('u-sup', 'Mia Thompson', 'mia.thompson@accesssite.example', 'supervisor', ORG_INTERNAL, 'jr-sup', { phone: '0400 222 333', employee_number: 'E-1051', start_date: '2022-08-08', is_scaffold_inspector: true }),
+      person('u-emp', 'Jordan Reid', 'jordan.reid@accesssite.example', 'worker', ORG_INTERNAL, 'jr-scaf', { phone: '0400 333 444', employee_number: 'E-1040', start_date: '2023-01-16', emergency_contact_name: 'Kim Reid', emergency_contact_phone: '0400 999 000', is_scaffold_inspector: true }),
+      person('u-emp2', 'Tom Walsh', 'tom.walsh@accesssite.example', 'worker', ORG_INTERNAL, 'jr-lab', { employee_number: 'E-1077', start_date: '2025-09-01' }),
+      person('u-acme1', 'Alice Nguyen', 'alice@acme.example', 'supervisor', ORG_ACME, 'jr-sup', { phone: '0412 555 101' }),
+      person('u-acme2', 'Ravi Patel', 'ravi@acme.example', 'worker', ORG_ACME, 'jr-scaf'),
+      person('u-bravo1', 'Ben Hughes', 'ben@bravo.example', 'supervisor', ORG_BRAVO, 'jr-sup', { phone: '0412 555 202' }),
+      person('u-bravo2', 'Kate Lin', 'kate@bravo.example', 'worker', ORG_BRAVO, 'jr-scaf'),
+      person('u-pending', 'Casey Morgan', 'casey.morgan@gmail.example', 'worker', ORG_INTERNAL, null, { is_active: false }),
     ],
-    invitations: [
-      { id: 'inv-1', email: 'dan.oconnor@accesssite.example', full_name: "Dan O'Connor", role: 'employee', organization_id: ORG_INTERNAL, job_role_id: 'jr-td', status: 'pending', invited_by: 'u-leader', expires_at: day(12), created_at: now },
-      { id: 'inv-2', email: 'crew@bravo.example', full_name: 'Bravo crew lead', role: 'contractor', organization_id: ORG_BRAVO, job_role_id: 'jr-lh', status: 'pending', invited_by: 'u-hseq', expires_at: day(5), created_at: now },
-    ],
+    invitations: [],
     jobRoles,
     rates: Object.entries(rateTable).map(([job_role_id, [cost_rate, charge_rate]]) => ({ job_role_id, cost_rate, charge_rate, currency: 'AUD' })),
     projects: [
-      { id: 'p-1', code: 'GNH-24', name: 'Great Northern Hwy – Bindoon Bypass', client_name: 'State Roads Authority', site_location: 'Bindoon, WA', status: 'active', is_active: true, start_date: '2026-02-01', end_date: '2027-06-30', description: 'Earthworks, drainage and pavement for 9 km bypass.', created_at: now, organization_ids: [ORG_ACME, ORG_BRAVO] },
-      { id: 'p-2', code: 'PHR-07', name: 'Pilbara Haul Road Stage 2', client_name: 'Red Ridge Mining', site_location: 'Newman, WA', status: 'active', is_active: true, start_date: '2026-05-15', end_date: null, description: null, created_at: now, organization_ids: [ORG_ACME] },
-      { id: 'p-3', code: 'KWI-02', name: 'Kwinana Industrial Lot Subdivision', client_name: 'Coastal Land Development', site_location: 'Kwinana, WA', status: 'planning', is_active: true, start_date: '2027-01-10', end_date: null, description: null, created_at: now, organization_ids: [] },
-      { id: 'p-4', code: 'ESP-19', name: 'Esperance Port Access Road', client_name: 'Southern Port Authority', site_location: 'Esperance, WA', status: 'completed', is_active: false, start_date: '2025-03-01', end_date: '2026-04-30', description: null, created_at: now, organization_ids: [] },
+      { id: 'p-1', code: 'PHW', name: 'Port Hedland Wharf Upgrade', client_name: 'Pilbara Ports', site_location: 'Port Hedland, WA', status: 'active', is_active: true, start_date: '2026-02-01', end_date: '2027-06-30', description: 'Access scaffolding and hung scaffolds under the wharf deck.', created_at: now, organization_ids: [ORG_ACME, ORG_BRAVO] },
+      { id: 'p-2', code: 'KGP', name: 'Karratha Gas Plant Shutdown', client_name: 'North West Energy', site_location: 'Karratha, WA', status: 'active', is_active: true, start_date: '2026-09-15', end_date: '2026-12-20', description: 'Shutdown access to tanks and pipe racks.', created_at: now, organization_ids: [ORG_ACME] },
+      { id: 'p-3', code: 'EQT', name: 'Elizabeth Quay Tower Facade', client_name: 'Swan Developments', site_location: 'Perth CBD, WA', status: 'planning', is_active: true, start_date: '2027-01-10', end_date: null, description: null, created_at: now, organization_ids: [] },
+      { id: 'p-4', code: 'BNH', name: 'Bunbury Harbour Conveyor', client_name: 'South West Ports', site_location: 'Bunbury, WA', status: 'completed', is_active: false, start_date: '2025-03-01', end_date: '2026-04-30', description: null, created_at: now, organization_ids: [] },
     ],
     lookupLists: [
       { key: 'event_types', name: 'Safety Event Types', description: 'Classification of safety events and incidents', visible_to_contractors: true, is_system: true },
@@ -279,7 +284,10 @@ export function buildDemoSeed(): DemoDb {
       ...lv('severity_levels', ['Low', 'Medium', 'High', 'Critical'], ['L', 'M', 'H', 'C']),
       ...lv('plant_categories', ['Excavator', 'Wheel Loader', 'Dozer', 'Grader', 'Roller / Compactor', 'Water Cart', 'Light Vehicle', 'Elevating Work Platform', 'Crane'], ['EX', 'WL', 'DZ', 'GR', 'RC', 'WC', 'LV', 'EWP', 'CR']),
       ...lv('hazard_categories', ['Working at Heights', 'Mobile Plant Interaction', 'Excavation / Trenching', 'Underground Services', 'Manual Handling', 'Heat Stress / Fatigue', 'Confined Space', 'Electrical']),
-      ...lv('ticket_types', ['Construction Induction (White Card)', 'First Aid (HLTAID011)', 'Working at Heights', 'Confined Space Entry', 'HRW – Forklift (LF)', 'HRW – Boom Type EWP (WP)', 'HRW – Dogging (DG)', 'Site Induction']),
+      ...lv('ticket_types', ['HRW – Scaffolding', 'Construction Induction (White Card)', 'First Aid (HLTAID011)', 'Working at Heights', 'Confined Space Entry', 'HRW – Forklift (LF)', 'HRW – Boom Type EWP (WP)', 'HRW – Dogging (DG)', 'HRW – Rigging', 'Site Induction', 'Driver Licence'],
+        ['SC', 'WC', 'FA', 'WAH', 'CSE', 'LF', 'WP', 'DG', 'RG', 'SI', 'DL']).map((v) => (
+          v.label === 'HRW – Scaffolding' || v.label === 'HRW – Rigging' ? { ...v, metadata: { classes: ['Basic', 'Intermediate', 'Advanced'] } }
+          : v.label === 'Driver Licence' ? { ...v, metadata: { classes: ['C', 'LR', 'MR', 'HR', 'HC', 'MC'] } } : v)),
       ...lv('cost_codes', ['Labour – Direct', 'Plant – Owned', 'Plant – Hired', 'Materials', 'Subcontractors', 'Preliminaries'], ['1000', '2000', '2100', '3000', '4000', '5000']),
     ],
     templates,
@@ -327,26 +335,38 @@ export function buildDemoSeed(): DemoDb {
       ] },
     ],
     rules: [
-      { id: 'rule-1', name: 'High severity safety event alert', description: 'Escalate any High or Critical event to leaders immediately.', module: 'safety_event', trigger_event: 'field_condition', trigger_config: { field: 'severity', operator: 'in', value: 'High,Critical' }, approval_chain: [{ step: 1, role: 'leader', sla_hours: 4 }], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'High severity safety event logged' }, { type: 'email', recipients: ['role:leader'], message: 'A High/Critical safety event requires review within 4 hours.' }], is_enabled: true, priority: 10, updated_at: now },
-      { id: 'rule-2', name: 'DFR submitted for approval', description: 'Daily Field Reports need leader approval once submitted.', module: 'daily_field_report', trigger_event: 'status_changed', trigger_config: { to_status: 'submitted' }, approval_chain: [{ step: 1, role: 'leader', sla_hours: 24 }], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'A Daily Field Report is awaiting approval' }], is_enabled: true, priority: 50, updated_at: now },
-      { id: 'rule-3', name: 'Plant defect reported', description: 'Notify leaders when a pre-start records a defect.', module: 'plant_prestart', trigger_event: 'status_changed', trigger_config: { to_status: 'defect_reported' }, approval_chain: [], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'Plant defect reported on pre-start — tag out until cleared' }, { type: 'email', recipients: ['role:leader'] }], is_enabled: true, priority: 20, updated_at: now },
-      { id: 'rule-5', name: 'Timesheet submitted for approval', description: 'Leaders approve submitted timesheets before payroll.', module: 'timesheet', trigger_event: 'status_changed', trigger_config: { to_status: 'submitted' }, approval_chain: [{ step: 1, role: 'leader', sla_hours: 48 }], actions: [{ type: 'in_app', recipients: ['role:leader'], message: 'A timesheet is awaiting approval' }], is_enabled: true, priority: 50, updated_at: now },
-      { id: 'rule-4', name: 'Ticket expiring in 30 days', description: 'Remind the worker (and leaders) before a licence or ticket expires.', module: 'training', trigger_event: 'ticket_expiring', trigger_config: { days_before: 30 }, approval_chain: [], actions: [{ type: 'in_app', recipients: ['submitter', 'role:leader'], message: 'A ticket or licence expires within 30 days' }], is_enabled: false, priority: 100, updated_at: now },
+      { id: 'rule-1', name: 'High severity safety event alert', description: 'Escalate any High or Critical event to leaders immediately.', module: 'safety_event', trigger_event: 'field_condition', trigger_config: { field: 'severity', operator: 'in', value: 'High,Critical' }, approval_chain: [{ step: 1, role: 'admin', sla_hours: 4 }], actions: [{ type: 'in_app', recipients: ['role:admin', 'role:hset'], message: 'High severity safety event logged' }, { type: 'email', recipients: ['role:admin', 'role:hset'], message: 'A High/Critical safety event requires review within 4 hours.' }], is_enabled: true, priority: 10, updated_at: now },
+      { id: 'rule-2', name: 'DFR submitted for approval', description: 'Daily Field Reports need leader approval once submitted.', module: 'daily_field_report', trigger_event: 'status_changed', trigger_config: { to_status: 'submitted' }, approval_chain: [{ step: 1, role: 'admin', sla_hours: 24 }], actions: [{ type: 'in_app', recipients: ['role:admin', 'role:hset'], message: 'A Daily Field Report is awaiting approval' }], is_enabled: true, priority: 50, updated_at: now },
+      { id: 'rule-3', name: 'Plant defect reported', description: 'Notify leaders when a pre-start records a defect.', module: 'plant_prestart', trigger_event: 'status_changed', trigger_config: { to_status: 'defect_reported' }, approval_chain: [], actions: [{ type: 'in_app', recipients: ['role:admin', 'role:hset'], message: 'Plant defect reported on pre-start — tag out until cleared' }, { type: 'email', recipients: ['role:admin', 'role:hset'] }], is_enabled: true, priority: 20, updated_at: now },
+      { id: 'rule-5', name: 'Timesheet submitted for approval', description: 'Leaders approve submitted timesheets before payroll.', module: 'timesheet', trigger_event: 'status_changed', trigger_config: { to_status: 'submitted' }, approval_chain: [{ step: 1, role: 'admin', sla_hours: 48 }], actions: [{ type: 'in_app', recipients: ['role:admin', 'role:hset'], message: 'A timesheet is awaiting approval' }], is_enabled: true, priority: 50, updated_at: now },
+      { id: 'rule-4', name: 'Ticket expiring in 30 days', description: 'Remind the worker (and leaders) before a licence or ticket expires.', module: 'training', trigger_event: 'ticket_expiring', trigger_config: { days_before: 30 }, approval_chain: [], actions: [{ type: 'in_app', recipients: ['submitter', 'role:admin', 'role:hset'], message: 'A ticket or licence expires within 30 days' }], is_enabled: false, priority: 100, updated_at: now },
     ],
     tickets: [
-      { id: 't-1', profile_id: 'u-emp', organization_id: ORG_INTERNAL, ticket_type: 'Construction Induction (White Card)', ticket_number: 'WC-448812', issuer: 'WorkSafe WA', issued_on: '2019-03-04', expires_on: null, verified_at: now, created_at: now },
-      { id: 't-2', profile_id: 'u-emp', organization_id: ORG_INTERNAL, ticket_type: 'First Aid (HLTAID011)', ticket_number: 'FA-90211', issuer: 'St John WA', issued_on: '2023-12-01', expires_on: day(18), verified_at: null, created_at: now },
-      { id: 't-3', profile_id: 'u-emp', organization_id: ORG_INTERNAL, ticket_type: 'HRW – Forklift (LF)', ticket_number: 'LF0049921', issuer: 'WorkSafe WA', issued_on: '2022-06-10', expires_on: '2027-06-10', verified_at: now, created_at: now },
-      { id: 't-4', profile_id: 'u-acme2', organization_id: ORG_ACME, ticket_type: 'Construction Induction (White Card)', ticket_number: 'WC-11002', issuer: 'WorkSafe WA', issued_on: '2020-01-01', expires_on: null, verified_at: null, created_at: now },
-      { id: 't-5', profile_id: 'u-acme3', organization_id: ORG_ACME, ticket_type: 'Working at Heights', ticket_number: 'WAH-5521', issuer: 'Safety Training WA', issued_on: '2024-02-01', expires_on: day(-3), verified_at: null, created_at: now },
-      { id: 't-6', profile_id: 'u-acme1', organization_id: ORG_ACME, ticket_type: 'First Aid (HLTAID011)', ticket_number: 'FA-12001', issuer: 'St John WA', issued_on: '2025-01-01', expires_on: day(400), verified_at: now, created_at: now },
-      { id: 't-7', profile_id: 'u-bravo1', organization_id: ORG_BRAVO, ticket_type: 'Site Induction', ticket_number: null, issuer: 'Access & Site Services', issued_on: '2026-02-02', expires_on: day(25), verified_at: null, created_at: now },
-    ],
+      { id: 't-1', profile_id: 'u-emp', organization_id: ORG_INTERNAL, ticket_type: 'HRW – Scaffolding', licence_class: 'Advanced', ticket_number: 'SA0051234', issuer: 'WorkSafe WA', issued_on: '2021-05-04', expires_on: '2031-05-04', verified_at: now, created_at: now },
+      { id: 't-2', profile_id: 'u-emp', organization_id: ORG_INTERNAL, ticket_type: 'First Aid (HLTAID011)', licence_class: null, ticket_number: 'FA-90211', issuer: 'St John WA', issued_on: '2023-12-01', expires_on: day(18), verified_at: null, created_at: now },
+      { id: 't-3', profile_id: 'u-emp', organization_id: ORG_INTERNAL, ticket_type: 'Construction Induction (White Card)', licence_class: null, ticket_number: 'WC-448812', issuer: 'WorkSafe WA', issued_on: '2019-03-04', expires_on: null, verified_at: now, created_at: now },
+      { id: 't-4', profile_id: 'u-sup', organization_id: ORG_INTERNAL, ticket_type: 'HRW – Scaffolding', licence_class: 'Intermediate', ticket_number: 'SI0042210', issuer: 'WorkSafe WA', issued_on: '2021-11-02', expires_on: day(-3), verified_at: now, created_at: now },
+      { id: 't-5', profile_id: 'u-acme2', organization_id: ORG_ACME, ticket_type: 'HRW – Scaffolding', licence_class: 'Basic', ticket_number: 'SB0099120', issuer: 'WorkSafe WA', issued_on: '2021-12-01', expires_on: day(20), verified_at: null, created_at: now },
+      { id: 't-6', profile_id: 'u-acme1', organization_id: ORG_ACME, ticket_type: 'First Aid (HLTAID011)', licence_class: null, ticket_number: 'FA-12001', issuer: 'St John WA', issued_on: '2025-01-01', expires_on: day(400), verified_at: now, created_at: now },
+      { id: 't-7', profile_id: 'u-bravo2', organization_id: ORG_BRAVO, ticket_type: 'Construction Induction (White Card)', licence_class: null, ticket_number: 'WC-77310', issuer: 'WorkSafe WA', issued_on: '2024-02-02', expires_on: null, verified_at: null, created_at: now },
+      { id: 't-8', profile_id: 'u-tom', organization_id: ORG_INTERNAL, ticket_type: 'Driver Licence', licence_class: 'MR', ticket_number: '7712345', issuer: 'Department of Transport', issued_on: '2018-04-01', expires_on: day(9), verified_at: null, created_at: now },
+    ].map((t) => (t.profile_id === 'u-tom' ? { ...t, profile_id: 'u-emp2' } : t)),
     notifications: [
-      { id: 'n-1', user_id: 'u-leader', title: 'Invitation pending', body: "Dan O'Connor hasn't accepted their invitation yet.", link: '/admin/users', read_at: null, created_at: now },
-      { id: 'n-2', user_id: 'u-emp', title: 'Ticket expiring soon', body: 'Your First Aid (HLTAID011) expires in 18 days.', link: '/training', read_at: null, created_at: now },
-      { id: 'n-3', user_id: 'u-acme1', title: 'Crew ticket expired', body: 'Ravi Patel – Working at Heights has expired.', link: '/crew', read_at: null, created_at: now },
+      { id: 'n-1', user_id: 'u-admin', title: 'Licence expired', body: 'Mia Thompson – HRW Scaffolding (Intermediate) expired 3 days ago.', link: '/people/u-sup', read_at: null, created_at: now },
+      { id: 'n-2', user_id: 'u-emp', title: 'Ticket expiring soon', body: 'Your First Aid (HLTAID011) expires in 18 days.', link: '/profile', read_at: null, created_at: now },
+      { id: 'n-3', user_id: 'u-acme1', title: 'Crew licence expiring', body: 'Ravi Patel – HRW Scaffolding (Basic) expires in 20 days.', link: '/people/u-acme2', read_at: null, created_at: now },
     ],
+    members: [
+      member('m-1', 'u-pm', 'p-1', true), member('m-2', 'u-pm', 'p-2', false, '2026-09-15'),
+      member('m-3', 'u-sup', 'p-1', true),
+      member('m-4', 'u-emp', 'p-1', true), member('m-5', 'u-emp', 'p-4', false, '2025-03-01', '2026-04-30'),
+      member('m-6', 'u-emp2', 'p-2', true, '2026-09-15'),
+      member('m-7', 'u-acme1', 'p-1', true), member('m-8', 'u-acme1', 'p-2', false, '2026-09-15'),
+      member('m-9', 'u-acme2', 'p-1', true),
+      member('m-10', 'u-bravo1', 'p-1', true),
+      member('m-11', 'u-bravo2', 'p-1', true),
+    ],
+    audit: [],
     records: [],
     approvals: [],
     events: [],

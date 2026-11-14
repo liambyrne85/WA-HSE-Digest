@@ -1,6 +1,6 @@
 // Domain types mirroring supabase/migrations/*.sql
 
-export type AppRole = 'leader' | 'employee' | 'contractor';
+export type AppRole = 'admin' | 'hset' | 'project_manager' | 'supervisor' | 'worker';
 export type OrgType = 'internal' | 'contractor';
 export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'completed' | 'closed';
 export type TemplateCategory =
@@ -54,8 +54,33 @@ export interface Profile {
   employee_number: string | null;
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
+  avatar_path?: string | null;
+  start_date: string | null;
+  is_scaffold_inspector: boolean;
   is_active: boolean;
+  last_seen_at?: string | null;
   created_at: string;
+}
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  profile_id: string;
+  is_primary: boolean;
+  start_date: string;
+  end_date: string | null;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  table_name: string;
+  record_id: string;
+  action: 'insert' | 'update' | 'delete';
+  changed_by: string | null;
+  changed_at: string;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
 }
 
 export interface Invitation {
@@ -102,6 +127,8 @@ export interface LookupValue {
   code: string | null;
   sort_order: number;
   is_active: boolean;
+  /** e.g. { classes: ['Basic', 'Intermediate', 'Advanced'] } for licence types */
+  metadata?: Record<string, unknown>;
 }
 
 // ---- Dynamic forms --------------------------------------------------------
@@ -249,7 +276,10 @@ export interface WorkerTicket {
   issuer: string | null;
   issued_on: string | null;
   expires_on: string | null;
+  licence_class?: string | null;
+  file_path?: string | null;
   verified_at: string | null;
+  archived_at?: string | null;
   created_at: string;
 }
 

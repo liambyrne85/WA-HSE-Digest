@@ -181,7 +181,7 @@ function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 function BottomNav({ onQuick, onMenu }: { onQuick: () => void; onMenu: () => void }) {
   const { role } = useAuth();
-  const training = role === 'contractor' ? 'Crew' : role === 'employee' ? 'Training' : 'Training';
+  const training = role === 'worker' ? 'Licences' : 'Licences';
   const item = 'flex min-h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[11px] font-bold uppercase tracking-wide';
   const cls = ({ isActive }: { isActive: boolean }) => clsx(item, isActive ? 'text-brand-600' : 'text-steel-500');
   const navItems = navFor(role!);

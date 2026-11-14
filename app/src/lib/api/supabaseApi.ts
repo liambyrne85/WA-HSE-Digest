@@ -1,9 +1,9 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Api, Session } from './types';
+import type { Api, ImportResult, Session } from './types';
 import type { RecordEvent } from '../types';
 type RecordDetailEvents = RecordEvent[];
 import type {
-  AppSettings, DirectoryEntry, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
+  AppSettings, AuditEntry, DirectoryEntry, ProjectMember, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, WorkerTicket, WorkflowPipeline, WorkflowRule,
 } from '../types';
 
@@ -74,7 +74,11 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       return toSession(data.session);
     },
     onAuthChange(cb) {
-      const { data } = sb.auth.onAuthStateChange((_e, s) => cb(toSession(s)));
+      const { data } = sb.auth.onAuthStateChange((event, s) => {
+        const sess = toSession(s);
+        // Arrived from a "set your password" / reset link: make them choose a password first.
+        cb(sess && event === 'PASSWORD_RECOVERY' ? { ...sess, recovery: true } : sess);
+      });
       return () => data.subscription.unsubscribe();
     },
     async signInWithPassword(email, password) {
@@ -124,15 +128,51 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     async listInvitations() {
       return unwrap(await sb.from('user_invitations').select('*').order('created_at', { ascending: false })) as Invitation[];
     },
-    async inviteUser(input) {
-      const data = await invoke({ action: 'invite', ...input });
-      return data.invitation as Invitation;
+    async createPerson(input, sendInvite) {
+      const data = await invoke({ action: 'create', ...input, send_invite: sendInvite });
+      return { profile_id: data.profile_id as string, invited: !!data.invited };
     },
-    async resendInvitation(id) {
-      await invoke({ action: 'resend', invitation_id: id });
+    async importPeople(rows, sendInvites) {
+      // Batches of 20 keep each server call well inside the function time limit.
+      const out: ImportResult[] = [];
+      for (let i = 0; i < rows.length; i += 20) {
+        const data = await invoke({ action: 'import', rows: rows.slice(i, i + 20), send_invite: sendInvites });
+        out.push(...(data.results as ImportResult[]).map((r) => ({ ...r, row: r.row + i })));
+      }
+      return out;
     },
-    async revokeInvitation(id) {
-      await invoke({ action: 'revoke', invitation_id: id });
+    async sendInvite(profileId) {
+      await invoke({ action: 'send_invite', profile_id: profileId });
+    },
+    async setPersonActive(profileId, active) {
+      await invoke({ action: 'set_active', profile_id: profileId, active });
+    },
+    async touchLastSeen() {
+      const id = await uid();
+      await sb.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', id);
+    },
+    async listProjectMembers(filter) {
+      let q = sb.from('project_members').select('*').order('start_date', { ascending: false });
+      if (filter?.profileId) q = q.eq('profile_id', filter.profileId);
+      if (filter?.projectId) q = q.eq('project_id', filter.projectId);
+      return unwrap(await q) as ProjectMember[];
+    },
+    async saveProjectMember(m) {
+      const { id, created_at: _c, ...row } = m;
+      const q = id ? sb.from('project_members').update(row).eq('id', id) : sb.from('project_members').insert(row);
+      return unwrap(await q.select().single()) as ProjectMember;
+    },
+    async listAudit(table, recordId) {
+      return unwrap(await sb.from('audit_log').select('*').eq('table_name', table).eq('record_id', recordId)
+        .order('changed_at', { ascending: false }).limit(100)) as AuditEntry[];
+    },
+    async uploadPersonFile(profileId, file, kind) {
+      const person = unwrap(await sb.from('profiles').select('organization_id').eq('id', profileId).single()) as { organization_id: string };
+      const ext = (file.type.split('/')[1] ?? 'jpg').replace('jpeg', 'jpg');
+      const path = `${person.organization_id}/${profileId}/${kind}-${Date.now()}.${ext}`;
+      const { error } = await sb.storage.from('worker-tickets').upload(path, file, { contentType: file.type });
+      if (error) throw new Error(`Upload failed: ${error.message}`);
+      return `storage:worker-tickets/${path}`;
     },
 
     async listJobRoles() {
@@ -190,9 +230,6 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       const q = v.id ? sb.from('lookup_values').update(v).eq('id', v.id) : sb.from('lookup_values').insert(v);
       return unwrap(await q.select().single()) as LookupValue;
     },
-    async deleteLookupValue(id) {
-      unwrap(await sb.from('lookup_values').delete().eq('id', id));
-    },
 
     async listTemplates() {
       return unwrap(await sb.from('form_templates').select('*').order('updated_at', { ascending: false })) as FormTemplate[];
@@ -238,7 +275,7 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       unwrap(await sb.from('workflow_pipelines').upsert({ module: p.module, statuses: p.statuses, updated_by: me }));
     },
     async listRules() {
-      return unwrap(await sb.from('workflow_rules').select('*').order('module').order('priority')) as WorkflowRule[];
+      return unwrap(await sb.from('workflow_rules').select('*').is('archived_at', null).order('module').order('priority')) as WorkflowRule[];
     },
     async saveRule(r) {
       const me = await uid();
@@ -248,8 +285,8 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
         : sb.from('workflow_rules').insert({ ...row, created_by: me, updated_by: me });
       return unwrap(await q.select().single()) as WorkflowRule;
     },
-    async deleteRule(id) {
-      unwrap(await sb.from('workflow_rules').delete().eq('id', id));
+    async archiveRule(id) {
+      unwrap(await sb.from('workflow_rules').update({ archived_at: new Date().toISOString(), is_enabled: false }).eq('id', id));
     },
     async testRules(module, event, record, old) {
       return unwrap(await sb.rpc('test_workflow_rules', {
@@ -258,23 +295,23 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     },
 
     async listTickets() {
-      return unwrap(await sb.from('worker_tickets').select('*').order('expires_on', { nullsFirst: false })) as WorkerTicket[];
+      return unwrap(await sb.from('worker_tickets').select('*').is('archived_at', null).order('expires_on', { nullsFirst: false })) as WorkerTicket[];
     },
     async saveTicket(t) {
-      const { id, created_at: _c, verified_at: _v, ...row } = t;
+      const { id, created_at: _c, archived_at: _a, ...row } = t;
       // organization_id is overwritten server-side from the worker's profile.
       const q = id
         ? sb.from('worker_tickets').update(row).eq('id', id)
         : sb.from('worker_tickets').insert({ organization_id: '00000000-0000-0000-0000-000000000000', ...row });
       return unwrap(await q.select().single()) as WorkerTicket;
     },
-    async deleteTicket(id) {
-      unwrap(await sb.from('worker_tickets').delete().eq('id', id));
+    async archiveTicket(id) {
+      unwrap(await sb.from('worker_tickets').update({ archived_at: new Date().toISOString() }).eq('id', id));
     },
 
     // ---- records ------------------------------------------------------------
     async listRecords(module) {
-      let q = sb.from('form_submissions').select('*').order('created_at', { ascending: false }).limit(500);
+      let q = sb.from('form_submissions').select('*').is('archived_at', null).order('created_at', { ascending: false }).limit(500);
       if (module) q = q.eq('module', module);
       return unwrap(await q) as RecordRow[];
     },
@@ -308,8 +345,8 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     async setRecordStatus(id, status) {
       unwrap(await sb.from('form_submissions').update({ status }).eq('id', id).select().single());
     },
-    async deleteRecord(id) {
-      unwrap(await sb.from('form_submissions').delete().eq('id', id));
+    async archiveRecord(id) {
+      unwrap(await sb.from('form_submissions').update({ archived_at: new Date().toISOString() }).eq('id', id));
     },
     async decideApproval(approvalId, decision, comment) {
       unwrap(await sb.rpc('decide_approval', { p_approval_id: approvalId, p_decision: decision, p_comment: comment ?? null }));

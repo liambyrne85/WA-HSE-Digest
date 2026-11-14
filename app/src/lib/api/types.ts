@@ -1,5 +1,5 @@
 import type {
-  AppRole, AppSettings, DirectoryEntry, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
+  AppRole, AppSettings, AuditEntry, DirectoryEntry, FormTemplate, ProjectMember, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
   LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
   WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger, RecordApproval, RecordEvent, RecordRow,
 } from '../types';
@@ -26,18 +26,36 @@ export interface RecordDetail {
 export interface Session {
   userId: string;
   email: string;
-  /** Set when a leader created the account with a temporary password. */
+  /** Set when an admin created the account with a temporary password. */
   mustChangePassword?: boolean;
+  /** Signed in from a "set your password" / reset email link. */
+  recovery?: boolean;
 }
 
-export interface InviteInput {
+/** Everything an admin enters when adding a person (also one CSV row). */
+export interface PersonInput {
   email: string;
-  full_name?: string;
+  full_name: string;
   role: AppRole;
   organization_id: string;
   job_role_id?: string | null;
-  /** Create the account now with this password instead of emailing an invite. */
-  temp_password?: string;
+  phone?: string | null;
+  employee_number?: string | null;
+  /** YYYY-MM-DD */
+  start_date?: string | null;
+  primary_project_id?: string | null;
+  is_scaffold_inspector?: boolean;
+  /** create the login now with this password instead of emailing a set-password link */
+  temp_password?: string | null;
+}
+
+export interface ImportResult {
+  row: number;
+  email: string;
+  ok: boolean;
+  error?: string;
+  profile_id?: string;
+  invited?: boolean;
 }
 
 export interface DemoAccount {
@@ -79,9 +97,20 @@ export interface Api {
 
   // invitations
   listInvitations(): Promise<Invitation[]>;
-  inviteUser(input: InviteInput): Promise<Invitation>;
-  resendInvitation(id: string): Promise<void>;
-  revokeInvitation(id: string): Promise<void>;
+  /** Admin: create a person (login + profile). Emails a set-password link unless a temporary password is given. */
+  createPerson(input: PersonInput, sendInvite: boolean): Promise<{ profile_id: string; invited: boolean }>;
+  importPeople(rows: PersonInput[], sendInvites: boolean): Promise<ImportResult[]>;
+  /** Admin: (re)send the "set your password" email. */
+  sendInvite(profileId: string): Promise<void>;
+  /** Admin: deactivate / reactivate (never delete). Also blocks sign-in. */
+  setPersonActive(profileId: string, active: boolean): Promise<void>;
+  touchLastSeen(): Promise<void>;
+  listProjectMembers(filter?: { profileId?: string; projectId?: string }): Promise<ProjectMember[]>;
+  /** Admin: add an assignment, change primary, or end it (end_date). */
+  saveProjectMember(m: Partial<ProjectMember> & { project_id?: string; profile_id?: string }): Promise<ProjectMember>;
+  listAudit(table: string, recordId: string): Promise<AuditEntry[]>;
+  /** Upload a person's photo or licence scan; returns a storage reference. */
+  uploadPersonFile(profileId: string, file: Blob, kind: 'photo' | 'licence'): Promise<string>;
 
   // job roles & commercial rates
   listJobRoles(): Promise<JobRole[]>;
@@ -98,7 +127,7 @@ export interface Api {
   saveLookupList(l: Partial<LookupList>): Promise<LookupList>;
   listLookupValues(listKey?: string): Promise<LookupValue[]>;
   saveLookupValue(v: Partial<LookupValue>): Promise<LookupValue>;
-  deleteLookupValue(id: string): Promise<void>;
+  deleteLookupValue?(id: string): Promise<void>;
 
   // templates
   listTemplates(): Promise<FormTemplate[]>;
@@ -114,13 +143,15 @@ export interface Api {
   savePipeline(p: WorkflowPipeline): Promise<void>;
   listRules(): Promise<WorkflowRule[]>;
   saveRule(r: Partial<WorkflowRule>): Promise<WorkflowRule>;
-  deleteRule(id: string): Promise<void>;
+  /** archive (never delete) */
+  archiveRule(id: string): Promise<void>;
   testRules(module: WorkflowModule, event: WorkflowTrigger, record: Record<string, unknown>, old?: Record<string, unknown>): Promise<WorkflowRule[]>;
 
   // tickets
   listTickets(): Promise<WorkerTicket[]>;
   saveTicket(t: Partial<WorkerTicket>): Promise<WorkerTicket>;
-  deleteTicket(id: string): Promise<void>;
+  /** archive (never delete) */
+  archiveTicket(id: string): Promise<void>;
 
   // records (field modules)
   listRecords(module?: WorkflowModule): Promise<RecordRow[]>;
@@ -128,7 +159,8 @@ export interface Api {
   getTemplateVersion(id: string): Promise<FormTemplateVersion | null>;
   saveRecord(input: RecordInput): Promise<RecordRow>;
   setRecordStatus(id: string, status: string): Promise<void>;
-  deleteRecord(id: string): Promise<void>;
+  /** archive a draft (never delete) */
+  archiveRecord(id: string): Promise<void>;
   decideApproval(approvalId: string, decision: 'approved' | 'rejected', comment?: string): Promise<void>;
   addComment(recordId: string, body: string): Promise<void>;
   /** pending approval steps the current user can act on */
