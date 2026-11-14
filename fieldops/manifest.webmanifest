@@ -1,0 +1,11 @@
+{
+  "name": "Field Safety",
+  "short_name": "Field Safety",
+  "description": "Pre-starts, scaffold inspections, incidents and field leadership.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#13213f",
+  "theme_color": "#13213f",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
