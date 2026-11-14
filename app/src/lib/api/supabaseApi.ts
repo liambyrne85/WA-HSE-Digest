@@ -5,7 +5,7 @@ type RecordDetailEvents = RecordEvent[];
 import type {
   AppSettings, AuditEntry, DirectoryEntry, Investigation, LeadershipTarget, Vehicle, ProjectMember, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, WorkerTicket, WorkflowPipeline, WorkflowRule,
-  Action, LicenceClass, Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
+  Action, LicenceClass, PublicScaffoldResult, PublicScaffoldView, Scaffold, TagPrint, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
 } from '../types';
 import { newId } from '../id';
 
@@ -415,6 +415,24 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     },
 
     // ---- branding -----------------------------------------------------------
+    // ---- QR page and tags --------------------------------------------------
+    async getPublicScaffold(token) {
+      const { data } = await sb.auth.getSession();
+      const res = await fetch(`${url}/functions/v1/scaffold-public?t=${encodeURIComponent(token)}`, {
+        headers: { apikey: anonKey, Authorization: `Bearer ${data.session?.access_token ?? anonKey}` },
+      });
+      if (res.status === 401 || res.status === 403) return { status: 'login_required' } as PublicScaffoldResult;
+      if (res.status === 404) return { status: 'not_found' } as PublicScaffoldResult;
+      if (!res.ok) throw new Error(`Couldn't load this scaffold (${res.status})`);
+      return { status: 'ok', view: (await res.json()) as PublicScaffoldView };
+    },
+    async listTagPrints(scaffoldId) {
+      return unwrap(await sb.from('scaffold_tag_prints').select('*').eq('scaffold_id', scaffoldId).order('printed_at', { ascending: false })) as TagPrint[];
+    },
+    async recordTagPrint(p) {
+      return unwrap(await sb.from('scaffold_tag_prints').insert(p).select().single()) as TagPrint;
+    },
+
     // ---- actions -----------------------------------------------------------
     async listActions(filter) {
       let q = sb.from('actions').select('*').is('archived_at', null).order('due_date');
@@ -539,8 +557,10 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       return unwrap(await sb.from('app_settings').select('*').eq('id', 1).single()) as AppSettings;
     },
     async saveSettings(patch) {
-      const { company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence, email_from, app_url } = patch;
-      const clean = Object.fromEntries(Object.entries({ company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence, email_from, app_url }).filter(([, v]) => v !== undefined));
+      const { company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence, email_from, app_url,
+        qr_requires_login, tag_label_size, tag_custom_width_mm, tag_custom_height_mm } = patch;
+      const clean = Object.fromEntries(Object.entries({ company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence, email_from, app_url,
+        qr_requires_login, tag_label_size, tag_custom_width_mm, tag_custom_height_mm }).filter(([, v]) => v !== undefined));
       return unwrap(await sb.from('app_settings').update({ ...clean, updated_by: await uid() }).eq('id', 1).select().single()) as AppSettings;
     },
     async uploadLogo(file) {

@@ -1,11 +1,11 @@
 // Table builders shared by the dashboard drill-downs, CSV and PDF export.
 import type { DashData, DashFilters } from './dashboard';
-import { tileIncidents, tileInvestigations, tileLeadership, tilePrestarts } from './dashboard';
+import { tileIncidents, tileInvestigations, tileLeadership, tilePrestarts, tileScaffolds } from './dashboard';
 import { downloadFile, toCsv } from './csv';
 import { INCIDENT_CATEGORY, INVESTIGATION_STATUS, ROLE_LABEL, daysUntil, formatAnswerDate, formatDate, formatDateTime } from './labels';
 
 export interface ExportTable { key: TileKey; title: string; head: string[]; body: (string | number)[][] }
-export type TileKey = 'prestarts' | 'investigations' | 'incidents' | 'leadership';
+export type TileKey = 'prestarts' | 'investigations' | 'incidents' | 'leadership' | 'scaffolds';
 
 export function buildTables(f: DashFilters, d: DashData): Record<TileKey, ExportTable> {
   const person = (id: string | null) => d.profiles.find((p) => p.id === id)?.full_name ?? '';
@@ -15,6 +15,8 @@ export function buildTables(f: DashFilters, d: DashData): Record<TileKey, Export
   const t2 = tileInvestigations(f, d);
   const t3 = tileIncidents(f, d);
   const t4 = tileLeadership(f, d);
+  const t5 = tileScaffolds(f, d);
+  const scaf = (id: string) => d.scaffolds?.find((s) => s.id === id);
   const rec = (id: string | null) => d.records.find((r) => r.id === id);
   return {
     prestarts: {
@@ -43,6 +45,16 @@ export function buildTables(f: DashFilters, d: DashData): Record<TileKey, Export
       body: t3.incidents.map((r) => [r.reference ?? '', r.answers?.['q-when'] ? formatAnswerDate(String(r.answers['q-when'])) : formatDate(r.record_date),
         INCIDENT_CATEGORY[String(r.summary?.incident_category)]?.label ?? '', String(r.summary?.event_type ?? ''), String(r.summary?.severity ?? ''),
         project(r.project_id), person(r.submitted_by), r.status.replace(/_/g, ' ')]),
+    },
+    scaffolds: {
+      key: 'scaffolds', title: 'Scaffolds',
+      head: ['Issue', 'Scaffold', 'Location', 'Project', 'Date', 'Detail'],
+      body: [
+        ...t5.overdue.map((s) => ['Inspection overdue', s.scaffold_number ?? '', s.location, project(s.project_id), formatDate(s.next_inspection_due), 'Do not use until inspected']),
+        ...t5.unsafe.map((s) => ['Tagged Unsafe', s.scaffold_number ?? '', s.location, project(s.project_id), formatDate(s.last_inspected_at ?? s.created_at), s.status_reason ?? '']),
+        ...t5.dueWeek.map((s) => ['Due within 7 days', s.scaffold_number ?? '', s.location, project(s.project_id), formatDate(s.next_inspection_due), '']),
+        ...t5.defects.map((x) => ['Open defect', scaf(x.scaffold_id)?.scaffold_number ?? '', x.item_label ?? '', project(x.project_id), formatDate(x.due_date), `${x.reference} · owner ${person(x.owner_id)}`]),
+      ],
     },
     leadership: {
       key: 'leadership', title: 'Field leadership vs target',

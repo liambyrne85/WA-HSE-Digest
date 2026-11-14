@@ -1,12 +1,15 @@
-import { ArrowDown, ArrowUp, Plus, Rocket, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Printer, Rocket, Trash2 } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
+import { LABEL_PRESETS, labelSizeFor } from '../../lib/printing/labels';
+import { downloadTagPdf } from '../../lib/printing/printers';
 import { useEffect, useState } from 'react';
-import { Badge, Button, Card, ErrorBanner, Field, Input, Modal, PageHeader, Select, Spinner } from '../../components/ui';
+import { Badge, Button, Card, ErrorBanner, Field, Input, Modal, PageHeader, Select, Spinner, Toggle } from '../../components/ui';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/labels';
 import { LICENCE_CLASSES } from '../../lib/scaffoldLogic';
-import type { ChecklistSection, LicenceClass } from '../../lib/types';
+import type { AppSettings, ChecklistSection, LabelSizeKey, LicenceClass } from '../../lib/types';
 import { errMsg, useAsync } from '../../lib/useAsync';
 
 const slug = (t: string, taken: string[]) => {
@@ -22,6 +25,10 @@ const move = <T,>(a: T[], i: number, d: number) => { const b = [...a]; const [x]
 export default function ScaffoldSettingsPage() {
   const toast = useToast();
   const confirm = useConfirm();
+  const theme = useTheme();
+  const saveSetting = async (patch: Partial<AppSettings>) => {
+    try { await api.saveSettings(patch); await Promise.all([theme.reload(), reload()]); toast('Saved'); } catch (err) { toast(errMsg(err), 'error'); }
+  };
   const [sections, setSections] = useState<ChecklistSection[]>([]);
   const [dirty, setDirty] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -53,6 +60,40 @@ export default function ScaffoldSettingsPage() {
           </Select>
         </Field>
         <p className="text-sm text-steel-600">The periodic inspection interval (default 30 days) is set on each project in <b>Projects &amp; Sites</b>.</p>
+      </Card>
+
+      <Card title="QR pages and printed tags" className="mb-5">
+        <div className="flex min-h-[48px] items-center gap-3">
+          <Toggle checked={!!data.settings.qr_requires_login} onChange={(v) => void saveSetting({ qr_requires_login: v })} label="Require sign-in for QR pages" />
+          <div>
+            <p className="font-semibold">Require sign-in to view a scanned tag</p>
+            <p className="text-sm text-steel-600">{data.settings.qr_requires_login ? 'Only people with an active login can see the QR page.' : 'Anyone who scans a tag can see its live status (no phone numbers, emails or licence numbers are shown).'}</p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Field label="Tag label size" hint="Used by default when printing tags. The PDF is made at exactly this size.">
+            <Select value={data.settings.tag_label_size ?? '100x150'} onChange={(e) => void saveSetting({ tag_label_size: e.target.value as LabelSizeKey })}>
+              {Object.values(LABEL_PRESETS).map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+              <option value="custom">Custom size</option>
+            </Select>
+          </Field>
+          {data.settings.tag_label_size === 'custom' && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Width (mm)"><Input type="number" inputMode="decimal" min={25} max={300} defaultValue={data.settings.tag_custom_width_mm ?? 100}
+                onBlur={(e) => void saveSetting({ tag_custom_width_mm: Number(e.target.value) || null })} /></Field>
+              <Field label="Height (mm)"><Input type="number" inputMode="decimal" min={25} max={400} defaultValue={data.settings.tag_custom_height_mm ?? 150}
+                onBlur={(e) => void saveSetting({ tag_custom_height_mm: Number(e.target.value) || null })} /></Field>
+            </div>
+          )}
+        </div>
+        <Button variant="secondary" className="mt-3" icon={<Printer className="h-4 w-4" />} onClick={async () => {
+          const size = labelSizeFor(data.settings);
+          await downloadTagPdf({ size, copies: 1, tag: {
+            company: data.settings.company_name, scaffoldNumber: 'SCF-TEST-0001', project: 'Test project', location: 'Test tag — check the size and QR scan',
+            status: 'restricted', restriction: 'Light duty only, max 2 persons', dutyClass: 'Light duty', maxLoad: '225 kg',
+            inspectedBy: 'Test Inspector (Intermediate)', inspectedAt: '01/01/2027 07:30', nextDue: '31/01/2027', qrUrl: `${window.location.origin}${import.meta.env.BASE_URL}`,
+          } }, `test-tag-${size.key}.pdf`);
+        }}>Download a test tag</Button>
       </Card>
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

@@ -1,7 +1,7 @@
 import type {
   AppSettings, AuditEntry, Investigation, LeadershipTarget, ProjectMember, Vehicle, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, TemplateSchema, WorkerTicket, WorkflowPipeline, WorkflowRule,
-  Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection, Action,
+  Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection, Action, TagPrint,
 } from '../types';
 import { STARTER_CHECKLIST } from '../scaffoldLogic';
 
@@ -40,6 +40,7 @@ export interface DemoDb {
   sdCounter: number;
   actions: Action[];
   actCounter: number;
+  tagPrints: TagPrint[];
 }
 
 const now = new Date().toISOString();
@@ -481,6 +482,7 @@ export function buildDemoSeed(): DemoDb {
     sdCounter: 0,
     actions: [],
     actCounter: 0,
+    tagPrints: [],
     records: [],
     approvals: [],
     events: [],

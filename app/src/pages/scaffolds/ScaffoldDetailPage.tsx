@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { StoredImage } from '../../components/forms/AnswerView';
 import { CloseDefectModal, ScaffoldFormModal, StatusBanner, dueText, typeLabel } from '../../components/scaffolds/shared';
+import { PrintTagModal } from '../../components/scaffolds/PrintTag';
+import { QrCard } from '../../components/scaffolds/QrCard';
 import { Badge, Button, Card, ErrorBanner, Field, Modal, Spinner, Textarea } from '../../components/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
@@ -30,17 +32,19 @@ export default function ScaffoldDetailPage() {
   const [tagging, setTagging] = useState(false);
   const [reason, setReason] = useState('');
   const [closing, setClosing] = useState<ScaffoldDefect | null>(null);
+  const [printing, setPrinting] = useState(false);
 
   const { data, loading, error, reload } = useAsync(async () => {
     const scaffolds = await api.listScaffolds();
     const s = scaffolds.find((x) => x.id === id);
     if (!s) throw new Error("This scaffold doesn't exist or isn't on your projects.");
-    const [inspections, defects, projects, people, inspector, audit] = await Promise.all([
+    const [inspections, defects, projects, people, inspector, audit, prints] = await Promise.all([
       api.listScaffoldInspections(s.id), api.listScaffoldDefects(s.id), api.listProjects(), api.listDirectory(),
       api.myInspectorStatus().catch(() => ({ ok: false, licenceClass: null, reason: 'Could not check your licence' })),
       api.listAudit('scaffolds', s.id).catch(() => [] as AuditEntry[]),
+      api.listTagPrints(s.id).catch(() => []),
     ]);
-    return { s, inspections, defects, projects, people, inspector, audit };
+    return { s, inspections, defects, projects, people, inspector, audit, prints };
   }, [id]);
   useEffect(() => api.subscribeChanges(() => { void reload(); }), [reload]);
 
@@ -151,6 +155,7 @@ export default function ScaffoldDetailPage() {
         </div>
 
         <aside className="space-y-5">
+          <QrCard s={s} inspections={inspections} prints={data.prints} people={data.people} onPrint={() => setPrinting(true)} />
           <Card title="Details">
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <Item k="Type" v={typeLabel(s)} />
@@ -188,6 +193,8 @@ export default function ScaffoldDetailPage() {
       </div>
 
       {editing && <ScaffoldFormModal initial={s} projects={data.projects} people={data.people} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }} />}
+      {printing && <PrintTagModal scaffold={s} inspection={inspections.find((i) => i.id === s.last_inspection_id) ?? null}
+        projectName={project ? `${project.code ? `${project.code} – ` : ''}${project.name}` : ''} onClose={() => setPrinting(false)} onPrinted={() => void reload()} />}
       {closing && <CloseDefectModal d={closing} onClose={() => setClosing(null)} onSaved={() => { setClosing(null); void reload(); }} />}
       <Modal open={tagging} onClose={() => setTagging(false)} title={`Tag ${s.scaffold_number} Unsafe`}
         footer={<><Button variant="secondary" onClick={() => setTagging(false)}>Cancel</Button>

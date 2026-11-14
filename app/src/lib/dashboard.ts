@@ -1,7 +1,8 @@
 // Dashboard tile calculations (tiles 1–4). Pure functions over rows the user is already
 // allowed to see — the database (RLS) decides visibility; this only counts and groups.
 import { addDays, perthToday } from './labels';
-import type { Investigation, LeadershipTarget, Profile, Project, ProjectMember, RecordRow, Vehicle } from './types';
+import { dueSoon, liveStatus } from './scaffoldLogic';
+import type { Investigation, LeadershipTarget, Profile, Project, ProjectMember, RecordRow, Scaffold, ScaffoldDefect, Vehicle } from './types';
 
 export interface DashFilters {
   /** '' = all projects the user can see */
@@ -20,6 +21,8 @@ export interface DashData {
   profiles: Profile[];
   projects: Project[];
   members: ProjectMember[];
+  scaffolds?: Scaffold[];
+  scaffoldDefects?: ScaffoldDefect[];
 }
 
 export const INCIDENT_CATEGORIES = ['injury', 'near_miss', 'property_damage', 'vehicle_plant', 'environmental'] as const;
@@ -154,4 +157,17 @@ export function thisWeek(today = perthToday()) {
   const g = new Date(`${today}T00:00:00Z`).getUTCDay();
   const from = addDays(today, g === 0 ? -6 : 1 - g);
   return { from, to: addDays(from, 6) };
+}
+
+// ---- Tile 5: scaffolds ------------------------------------------------------------
+/** Current state (not limited to the date range): due in the next 7 days, overdue, tagged Unsafe, open defects. */
+export function tileScaffolds(f: DashFilters, d: DashData, today = perthToday()) {
+  const scope = projectScope(f, d);
+  const all = (d.scaffolds ?? []).filter((s) => !s.archived_at && s.status !== 'dismantled' && inScope(scope, s.project_id));
+  const dueWeek = all.filter((s) => dueSoon(s, 7, today)).sort((a, b) => (a.next_inspection_due ?? '').localeCompare(b.next_inspection_due ?? ''));
+  const overdue = all.filter((s) => liveStatus(s, today) === 'overdue').sort((a, b) => (a.next_inspection_due ?? '').localeCompare(b.next_inspection_due ?? ''));
+  const unsafe = all.filter((s) => s.status === 'unsafe');
+  const defects = (d.scaffoldDefects ?? []).filter((x) => x.status === 'open' && inScope(scope, x.project_id))
+    .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
+  return { dueWeek, overdue, unsafe, defects, total: all.length };
 }

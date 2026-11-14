@@ -1,4 +1,6 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom';
+import PublicScaffoldPage, { AFTER_LOGIN_KEY } from './pages/PublicScaffoldPage';
 import { AppShell } from './components/layout/AppShell';
 import { Spinner } from './components/ui';
 import { useAuth } from './contexts/AuthContext';
@@ -39,7 +41,20 @@ function RequireRole({ roles, children }: { roles: AppRole[]; children: JSX.Elem
 
 export default function App() {
   const { session, profile, loading } = useAuth();
+  const qr = useMatch('/s/:token');
+  const nav = useNavigate();
+  // Back to the scaffold page a QR code opened, after signing in.
+  useEffect(() => {
+    if (!session || !profile?.is_active) return;
+    let next: string | null = null;
+    try { next = sessionStorage.getItem(AFTER_LOGIN_KEY); sessionStorage.removeItem(AFTER_LOGIN_KEY); } catch { /* ignore */ }
+    if (next) nav(next, { replace: true });
+  }, [session, profile, nav]);
 
+  // A scaff tag's QR page: open to anyone (the server decides if a sign-in is needed).
+  if (qr?.params.token) return <PublicScaffoldPage token={qr.params.token} />;
+  const sParam = (() => { try { return new URLSearchParams(window.location.search).get('s'); } catch { return null; } })();
+  if (sParam && /^[0-9a-f]{32,128}$/.test(sParam)) return <PublicScaffoldPage token={sParam} />;
   if (loading) return <div className="flex min-h-screen items-center justify-center"><Spinner /></div>;
   if (!session) {
     return (

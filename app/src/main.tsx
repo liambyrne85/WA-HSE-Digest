@@ -27,7 +27,10 @@ const router = createRouter([
       </ThemeProvider>
     ),
   },
-], { basename: import.meta.env.VITE_MEMORY_ROUTER === '1' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });
+], import.meta.env.VITE_MEMORY_ROUTER === '1'
+  // Demo / preview: a scanned tag opens …?s={token} (no server-side routes there)
+  ? { initialEntries: [(() => { try { const t = new URLSearchParams(window.location.search).get('s'); return t ? `/s/${t}` : '/'; } catch { return '/'; } })()] }
+  : { basename: import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });
 
 // Offline: cache the app itself (service worker) and send anything saved with no coverage.
 if (import.meta.env.PROD && 'serviceWorker' in navigator && location.protocol !== 'file:') {
