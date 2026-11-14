@@ -205,7 +205,7 @@ select tests.assert_count('select * from public.worker_tickets', 1, 'worker sees
 select tests.assert_count('select * from public.project_members', 2, 'worker sees own assignment history');
 select tests.assert_count('select * from public.job_role_rates', 0, 'worker cannot see rates');
 select tests.assert_count('select * from public.user_invitations', 0, 'worker cannot see invitations');
-select tests.assert_count($$select * from public.form_templates where status = 'published'$$, 6, 'worker sees published forms');
+select tests.assert_count($$select * from public.form_templates where status = 'published'$$, 8, 'worker sees published forms');
 select tests.assert_fails($$update public.profiles set role = 'admin' where id = '22222222-2222-2222-2222-222222222222'$$, 'worker cannot self-promote');
 update public.profiles set phone = '0400 000 000' where id = '22222222-2222-2222-2222-222222222222';
 select tests.assert_count($$select 1 from public.profiles where phone = '0400 000 000'$$, 1, 'worker can update own contact details');

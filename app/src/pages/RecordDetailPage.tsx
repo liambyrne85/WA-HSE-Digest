@@ -1,21 +1,21 @@
 import { clsx } from 'clsx';
-import { ArrowLeft, Check, CheckCircle2, Circle, Clock, MessageSquare, Pencil, Send, Trash2, X, XCircle } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, Circle, Clock, MessageSquare, Pencil, Search, Send, Trash2, Truck, X, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AnswerView } from '../components/forms/AnswerView';
-import { Button, Card, ErrorBanner, Field, Modal, Select, Spinner, Textarea } from '../components/ui';
+import { Badge, Button, Card, ErrorBanner, Field, Input, Modal, Select, Spinner, Textarea } from '../components/ui';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../lib/api';
-import { MODULE_LABEL, MODULE_ROUTE, ROLE_LABEL, formatDateTime } from '../lib/labels';
+import { INCIDENT_CATEGORY, INVESTIGATION_STATUS, MODULE_LABEL, MODULE_ROUTE, ROLE_LABEL, addDays, daysUntil, formatDate, formatDateTime, perthToday } from '../lib/labels';
 import type { RecordApproval } from '../lib/types';
 import { errMsg, useAsync } from '../lib/useAsync';
 import { RecordChips, StatusBadge } from './ModulePage';
 
 export default function RecordDetailPage() {
   const { id } = useParams();
-  const { profile, isLeader, role } = useAuth();
+  const { profile, isLeader, isProjectLead, role } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
   const nav = useNavigate();
@@ -24,12 +24,21 @@ export default function RecordDetailPage() {
   const [rejectNote, setRejectNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [moveTo, setMoveTo] = useState('');
+  const [starting, setStarting] = useState(false);
 
   const { data, loading, error, reload } = useAsync(async () => {
     const d = await api.getRecord(id!);
     if (!d) throw new Error("This record doesn't exist or you don't have access to it.");
-    const [pipelines, projects, people, orgs] = await Promise.all([api.listPipelines(), api.listProjects(), api.listDirectory(), api.listOrganizations()]);
-    return { ...d, statuses: pipelines.find((p) => p.module === d.record.module)?.statuses ?? [], projects, people, orgs };
+    const [pipelines, projects, people, orgs, investigations, vehicles] = await Promise.all([
+      api.listPipelines(), api.listProjects(), api.listDirectory(), api.listOrganizations(),
+      d.record.module === 'safety_event' ? api.listInvestigations().catch(() => []) : Promise.resolve([]),
+      d.record.vehicle_id ? api.listVehicles().catch(() => []) : Promise.resolve([]),
+    ]);
+    return {
+      ...d, statuses: pipelines.find((p) => p.module === d.record.module)?.statuses ?? [], projects, people, orgs,
+      investigation: investigations.find((i) => i.incident_id === d.record.id) ?? null,
+      vehicle: vehicles.find((v) => v.id === d.record.vehicle_id) ?? null,
+    };
   }, [id]);
 
   if (loading && !data) return <Spinner />;
@@ -121,6 +130,16 @@ export default function RecordDetailPage() {
               <div><dt className="text-xs font-bold uppercase text-steel-500">Submitted by</dt><dd className="font-semibold">{person(r.submitted_by)}</dd></div>
               <div><dt className="text-xs font-bold uppercase text-steel-500">Submitted</dt><dd className="font-semibold">{r.submitted_at ? formatDateTime(r.submitted_at) : 'Not yet'}</dd></div>
               <div><dt className="text-xs font-bold uppercase text-steel-500">Form</dt><dd className="font-semibold">{version.name} · v{version.version}</dd></div>
+              {r.record_date && <div><dt className="text-xs font-bold uppercase text-steel-500">{r.module === 'safety_event' ? 'Date of event' : 'Date'}</dt><dd className="font-semibold">{formatDate(r.record_date)}</dd></div>}
+              {r.vehicle_id && (
+                <div><dt className="text-xs font-bold uppercase text-steel-500">Vehicle / plant</dt><dd className="font-semibold">
+                  <Link to={`/vehicles?focus=${r.vehicle_id}`} className="inline-flex items-center gap-1.5 text-brand-700 hover:underline"><Truck className="h-4 w-4" />{data.vehicle?.fleet_number ?? 'Vehicle'}{data.vehicle?.rego ? ` (${data.vehicle.rego})` : ''}</Link>
+                  {data.vehicle?.status === 'out_of_service' && <Badge color="red" className="ml-2">Out of service</Badge>}
+                </dd></div>
+              )}
+              {typeof r.summary?.incident_category === 'string' && INCIDENT_CATEGORY[r.summary.incident_category] && (
+                <div><dt className="text-xs font-bold uppercase text-steel-500">Incident category</dt><dd><Badge color={INCIDENT_CATEGORY[r.summary.incident_category]!.color}>{INCIDENT_CATEGORY[r.summary.incident_category]!.label}</Badge></dd></div>
+              )}
             </dl>
           </Card>
 
@@ -128,6 +147,27 @@ export default function RecordDetailPage() {
         </div>
 
         <aside className="space-y-5">
+          {r.module === 'safety_event' && r.status !== 'draft' && (data.investigation || isLeader || isProjectLead) && (
+            <Card title="Investigation" padded={false}>
+              {data.investigation ? (() => {
+                const inv = data.investigation;
+                const left = daysUntil(inv.due_date);
+                const overdue = inv.status !== 'closed' && left !== null && left < 0;
+                return (
+                  <Link to={`/investigations/${inv.id}`} className={clsx('block px-4 py-3 hover:bg-steel-50', overdue && 'bg-red-50')}>
+                    <p className="flex items-center justify-between gap-2"><span className="font-mono font-bold text-brand-700">{inv.reference}</span>
+                      <Badge color={overdue ? 'red' : INVESTIGATION_STATUS[inv.status]!.color}>{overdue ? 'Overdue' : INVESTIGATION_STATUS[inv.status]!.label}</Badge></p>
+                    <p className="mt-1 text-sm text-steel-600">Lead: {inv.lead_id ? person(inv.lead_id) : 'Unassigned'} · {inv.status === 'closed' ? `Closed ${formatDate(inv.closed_at)}` : `Due ${formatDate(inv.due_date)}`}</p>
+                  </Link>
+                );
+              })() : (
+                <div className="p-4">
+                  <p className="mb-3 text-sm text-steel-600">No investigation has been opened for this event.</p>
+                  <Button block icon={<Search className="h-5 w-5" />} onClick={() => setStarting(true)}>Start investigation</Button>
+                </div>
+              )}
+            </Card>
+          )}
           {approvals.length > 0 && (
             <Card title="Approvals" padded={false}>
               <ol className="divide-y divide-steel-100">
@@ -194,6 +234,12 @@ export default function RecordDetailPage() {
         </aside>
       </div>
 
+      {starting && (
+        <StartInvestigationModal incidentId={r.id} defaultDue={addDays(r.record_date ?? perthToday(), 14)}
+          leaders={data.people.filter((p) => ['admin', 'hset', 'project_manager', 'supervisor'].includes(p.role))}
+          onClose={() => setStarting(false)} onCreated={(invId) => nav(`/investigations/${invId}`)} />
+      )}
+
       <Modal open={!!rejecting} onClose={() => setRejecting(null)} title="Reject"
         footer={<>
           <Button variant="secondary" onClick={() => setRejecting(null)}>Cancel</Button>
@@ -205,5 +251,38 @@ export default function RecordDetailPage() {
         </Field>
       </Modal>
     </div>
+  );
+}
+
+function StartInvestigationModal({ incidentId, defaultDue, leaders, onClose, onCreated }: {
+  incidentId: string; defaultDue: string; leaders: { id: string; full_name: string; role: keyof typeof ROLE_LABEL }[];
+  onClose: () => void; onCreated: (id: string) => void;
+}) {
+  const { profile } = useAuth();
+  const toast = useToast();
+  const [lead, setLead] = useState(profile?.id ?? '');
+  const [due, setDue] = useState(defaultDue);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal open onClose={onClose} title="Start investigation"
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button loading={busy} onClick={async () => {
+          setBusy(true);
+          try {
+            const inv = await api.saveInvestigation({ incident_id: incidentId, lead_id: lead || null, due_date: due || null });
+            toast(`${inv.reference} opened`);
+            onCreated(inv.id);
+          } catch (e) { toast(errMsg(e), 'error'); setBusy(false); }
+        }}>Open investigation</Button></>}>
+      <Field label="Investigation lead">
+        <Select value={lead} onChange={(e) => setLead(e.target.value)}>
+          <option value="">Unassigned</option>
+          {leaders.map((p) => <option key={p.id} value={p.id}>{p.full_name} ({ROLE_LABEL[p.role]})</option>)}
+        </Select>
+      </Field>
+      <Field label="Due date" hint="Defaults to 14 days after the event.">
+        <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+      </Field>
+    </Modal>
   );
 }

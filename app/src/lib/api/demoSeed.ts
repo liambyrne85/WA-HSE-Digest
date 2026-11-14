@@ -1,5 +1,5 @@
 import type {
-  AppSettings, AuditEntry, ProjectMember, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
+  AppSettings, AuditEntry, Investigation, LeadershipTarget, ProjectMember, Vehicle, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, TemplateSchema, WorkerTicket, WorkflowPipeline, WorkflowRule,
 } from '../types';
 
@@ -25,6 +25,10 @@ export interface DemoDb {
   settings: AppSettings;
   members: ProjectMember[];
   audit: AuditEntry[];
+  vehicles: Vehicle[];
+  investigations: Investigation[];
+  targets: LeadershipTarget[];
+  invCounter: number;
 }
 
 const now = new Date().toISOString();
@@ -48,6 +52,11 @@ const person = (id: string, full_name: string, email: string, role: Profile['rol
   id, full_name, email, role, organization_id, job_role_id, phone: null, employee_number: null,
   emergency_contact_name: null, emergency_contact_phone: null, start_date: null, is_scaffold_inspector: false,
   is_active: true, created_at: now, ...extra,
+});
+const vehicle = (id: string, fleet_number: string, rego: string | null, vehicle_type: string, project_id: string | null,
+  operator_id: string | null, extra: Partial<Vehicle> = {}): Vehicle => ({
+  id, fleet_number, rego, vehicle_type, project_id, operator_id, is_active: true, daily_prestart_required: true, status: 'in_service',
+  out_of_service_reason: null, out_of_service_at: null, out_of_service_record_id: null, notes: null, archived_at: null, created_at: '2026-01-05T00:00:00.000Z', ...extra,
 });
 const member = (id: string, profile_id: string, project_id: string, is_primary: boolean, start = '2026-02-02', end: string | null = null): ProjectMember => ({
   id, profile_id, project_id, is_primary, start_date: start, end_date: end, created_at: now,
@@ -144,6 +153,7 @@ export const STARTER_TEMPLATES: { name: string; description: string; category: F
       settings: { requireProject: true, requireSignOff: false },
       sections: [
         { id: 's-what', title: 'What Happened', questions: [
+          { id: 'q-when', label: 'Date and time of the incident', type: 'datetime', required: true, fieldKey: 'record_date' },
           { id: 'q-type', label: 'Event type', type: 'dropdown', required: true, lookupKey: 'event_types' },
           { id: 'q-sev', label: 'Severity', type: 'dropdown', required: true, lookupKey: 'severity_levels' },
           { id: 'q-desc', label: 'Description', type: 'text', required: true, multiline: true },
@@ -206,6 +216,56 @@ STARTER_TEMPLATES.push(
         ] },
         { id: 's-sign', title: 'Sign-off', questions: [
           { id: 'q-sig', label: 'Supervisor signature', type: 'signature', required: true },
+        ] },
+      ],
+    },
+  },
+);
+
+STARTER_TEMPLATES.push(
+  {
+    name: 'Vehicle Pre-Start',
+    description: 'Daily pre-start for utes, trucks and HIABs on the vehicle register.',
+    category: 'plant_prestart',
+    schema: {
+      settings: { requireProject: true, requireVehicle: true, requireSignOff: false },
+      sections: [
+        { id: 's-v-details', title: 'Vehicle', questions: [
+          { id: 'q-v-odo', label: 'Odometer / hour meter', type: 'number', required: true, unit: 'km' },
+        ] },
+        { id: 's-v-walk', title: 'Walk-around', questions: [
+          { id: 'q-v-tyres', label: 'Tyres and wheel nuts OK', type: 'pass_fail_na', required: true, critical: true, photoOnFail: true },
+          { id: 'q-v-lights', label: 'Lights, indicators and beacon working', type: 'pass_fail_na', required: true, photoOnFail: true },
+          { id: 'q-v-fluids', label: 'Oil, coolant and fluids OK, no leaks', type: 'pass_fail_na', required: true, photoOnFail: true },
+          { id: 'q-v-body', label: 'Body, mirrors and windscreen undamaged', type: 'pass_fail_na', required: true, photoOnFail: true },
+          { id: 'q-v-load', label: 'Load restraint (straps, chains, gates) OK', type: 'pass_fail_na', required: true, critical: true, photoOnFail: true },
+        ] },
+        { id: 's-v-cab', title: 'In the cab', questions: [
+          { id: 'q-v-brakes', label: 'Service and park brakes work', type: 'pass_fail_na', required: true, critical: true },
+          { id: 'q-v-belts', label: 'Seatbelts work', type: 'pass_fail_na', required: true, critical: true },
+          { id: 'q-v-horn', label: 'Horn and reversing alarm work', type: 'pass_fail_na', required: true },
+          { id: 'q-v-kit', label: 'First aid kit and fire extinguisher present', type: 'pass_fail_na', required: true },
+          { id: 'q-v-hiab', label: 'HIAB / crane checks done (if fitted)', type: 'pass_fail_na', required: true },
+        ] },
+        { id: 's-v-sign', title: 'Driver', questions: [
+          { id: 'q-v-fit', label: 'I am fit to drive and the vehicle is safe to use', type: 'yes_no', required: true, critical: true },
+          { id: 'q-v-sig', label: 'Driver signature', type: 'signature', required: true },
+        ] },
+      ],
+    },
+  },
+  {
+    name: 'Field Leadership',
+    description: 'Leader in the field: site walks, safety conversations, toolbox talks.',
+    category: 'field_leadership',
+    schema: {
+      settings: { requireProject: true, requireSignOff: false },
+      sections: [
+        { id: 's-fl', title: 'Field leadership', questions: [
+          { id: 'q-fl-date', label: 'Date', type: 'date', required: true, fieldKey: 'record_date' },
+          { id: 'q-fl-type', label: 'Activity type', type: 'dropdown', required: true, lookupKey: 'leadership_activities', fieldKey: 'activity_type' },
+          { id: 'q-fl-obs', label: 'Observations', type: 'text', required: true, multiline: true },
+          { id: 'q-fl-photos', label: 'Photos', type: 'photo', required: false },
         ] },
       ],
     },
@@ -278,9 +338,14 @@ export function buildDemoSeed(): DemoDb {
       { key: 'hazard_categories', name: 'Hazard Categories', description: 'Used in risk assessments and hazard reports', visible_to_contractors: true, is_system: true },
       { key: 'ticket_types', name: 'Tickets & Licences', description: 'High-risk work licences, inductions, training', visible_to_contractors: true, is_system: true },
       { key: 'cost_codes', name: 'Cost Codes', description: 'Commercial cost codes (internal only)', visible_to_contractors: false, is_system: true },
+      { key: 'vehicle_types', name: 'Vehicle Types', description: 'Types used in the vehicle register', visible_to_contractors: true, is_system: true },
+      { key: 'leadership_activities', name: 'Field Leadership Activities', description: 'Activity types for field leadership records', visible_to_contractors: true, is_system: true },
     ],
     lookupValues: [
-      ...lv('event_types', ['Near Miss', 'First Aid Injury', 'Medical Treatment Injury', 'Lost Time Injury', 'Property / Plant Damage', 'Environmental Incident', 'Hazard Report', 'Positive Observation'], ['NM', 'FAI', 'MTI', 'LTI', 'PD', 'ENV', 'HAZ', 'OBS']),
+      ...lv('event_types', ['Near Miss', 'First Aid Injury', 'Medical Treatment Injury', 'Lost Time Injury', 'Property / Plant Damage', 'Vehicle / Plant Incident', 'Environmental Incident', 'Hazard Report', 'Positive Observation'], ['NM', 'FAI', 'MTI', 'LTI', 'PD', 'VPI', 'ENV', 'HAZ', 'OBS'])
+        .map((v, i) => ({ ...v, metadata: { category: ['near_miss', 'injury', 'injury', 'injury', 'property_damage', 'vehicle_plant', 'environmental', 'hazard', 'observation'][i] } })),
+      ...lv('vehicle_types', ['Ute', 'Light Vehicle', 'Truck', 'HIAB Truck', 'Trailer', 'Bus', 'Forklift', 'EWP']),
+      ...lv('leadership_activities', ['Site safety walk', 'Safety interaction / conversation', 'Toolbox talk', 'Pre-start meeting', 'Scaffold inspection observation', 'Critical risk control verification', 'Audit']),
       ...lv('severity_levels', ['Low', 'Medium', 'High', 'Critical'], ['L', 'M', 'H', 'C']),
       ...lv('plant_categories', ['Excavator', 'Wheel Loader', 'Dozer', 'Grader', 'Roller / Compactor', 'Water Cart', 'Light Vehicle', 'Elevating Work Platform', 'Crane'], ['EX', 'WL', 'DZ', 'GR', 'RC', 'WC', 'LV', 'EWP', 'CR']),
       ...lv('hazard_categories', ['Working at Heights', 'Mobile Plant Interaction', 'Excavation / Trenching', 'Underground Services', 'Manual Handling', 'Heat Stress / Fatigue', 'Confined Space', 'Electrical']),
@@ -328,6 +393,9 @@ export function buildDemoSeed(): DemoDb {
         { key: 'approved', label: 'Approved', color: 'green', is_terminal: true },
         { key: 'rejected', label: 'Returned', color: 'red', is_terminal: false },
       ] },
+      { module: 'field_leadership', statuses: [
+        { key: 'submitted', label: 'Completed', color: 'green', is_terminal: true },
+      ] },
       { module: 'training', statuses: [
         { key: 'current', label: 'Current', color: 'green', is_terminal: false },
         { key: 'expiring', label: 'Expiring', color: 'amber', is_terminal: false },
@@ -367,6 +435,24 @@ export function buildDemoSeed(): DemoDb {
       member('m-11', 'u-bravo2', 'p-1', true),
     ],
     audit: [],
+    vehicles: [
+      vehicle('v-1', 'UTE-01', '1HSE001', 'Ute', 'p-1', 'u-emp'),
+      vehicle('v-2', 'UTE-02', '1HSE002', 'Ute', 'p-1', 'u-acme2'),
+      vehicle('v-3', 'HIAB-03', '1HSE003', 'HIAB Truck', 'p-1', 'u-sup'),
+      vehicle('v-4', 'TRK-04', '1HSE004', 'Truck', 'p-2', 'u-emp2'),
+      vehicle('v-5', 'UTE-05', '1HSE005', 'Ute', 'p-2', null),
+      vehicle('v-6', 'TRL-06', '1TRL006', 'Trailer', 'p-1', null, { daily_prestart_required: false }),
+      vehicle('v-7', 'FL-07', null, 'Forklift', 'p-1', null, { is_active: false }),
+    ],
+    investigations: [],
+    targets: [
+      { profile_id: 'u-sup', period: 'week', target: 3 },
+      { profile_id: 'u-pm', period: 'week', target: 2 },
+      { profile_id: 'u-acme1', period: 'week', target: 2 },
+      { profile_id: 'u-bravo1', period: 'week', target: 2 },
+      { profile_id: 'u-hset', period: 'month', target: 12 },
+    ],
+    invCounter: 0,
     records: [],
     approvals: [],
     events: [],

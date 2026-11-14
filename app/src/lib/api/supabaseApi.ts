@@ -3,7 +3,7 @@ import type { Api, ImportResult, Session } from './types';
 import type { RecordEvent } from '../types';
 type RecordDetailEvents = RecordEvent[];
 import type {
-  AppSettings, AuditEntry, DirectoryEntry, ProjectMember, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
+  AppSettings, AuditEntry, DirectoryEntry, Investigation, LeadershipTarget, Vehicle, ProjectMember, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, WorkerTicket, WorkflowPipeline, WorkflowRule,
 } from '../types';
 
@@ -310,10 +310,46 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     },
 
     // ---- records ------------------------------------------------------------
-    async listRecords(module) {
-      let q = sb.from('form_submissions').select('*').is('archived_at', null).order('created_at', { ascending: false }).limit(500);
+    async listRecords(module, range) {
+      let q = sb.from('form_submissions').select('*').is('archived_at', null).order('created_at', { ascending: false }).limit(2000);
       if (module) q = q.eq('module', module);
+      if (range?.from) q = q.gte('record_date', range.from);
+      if (range?.to) q = q.lte('record_date', range.to);
       return unwrap(await q) as RecordRow[];
+    },
+    async listVehicles() {
+      return unwrap(await sb.from('vehicles').select('*').is('archived_at', null).order('fleet_number')) as Vehicle[];
+    },
+    async saveVehicle(v) {
+      const { id, created_at: _c, ...row } = v;
+      const q = id ? sb.from('vehicles').update(row).eq('id', id) : sb.from('vehicles').insert(row);
+      return unwrap(await q.select().single()) as Vehicle;
+    },
+    async listInvestigations() {
+      return unwrap(await sb.from('investigations').select('*').is('archived_at', null).order('opened_at', { ascending: false })) as Investigation[];
+    },
+    async saveInvestigation(i) {
+      const { id, created_at: _c, reference: _r, opened_at: _o, closed_at: _x, ...row } = i;
+      const q = id ? sb.from('investigations').update(row).eq('id', id) : sb.from('investigations').insert(row);
+      return unwrap(await q.select().single()) as Investigation;
+    },
+    async listTargets() {
+      return unwrap(await sb.from('leadership_targets').select('profile_id, period, target')) as LeadershipTarget[];
+    },
+    async saveTarget(t) {
+      unwrap(await sb.from('leadership_targets').upsert({ profile_id: t.profile_id, period: t.period, target: t.target }));
+    },
+    subscribeChanges(cb) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const fire = () => { clearTimeout(timer); timer = setTimeout(cb, 400); };
+      const channel = sb.channel(`dash-${Math.random().toString(36).slice(2)}`);
+      for (const table of ['form_submissions', 'vehicles', 'investigations', 'leadership_targets']) {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table }, fire);
+      }
+      channel.subscribe();
+      // Fallback for flaky connections: refresh every 2 minutes as well.
+      const poll = setInterval(cb, 120000);
+      return () => { clearTimeout(timer); clearInterval(poll); void sb.removeChannel(channel); };
     },
     async getRecord(id) {
       const record = unwrap(await sb.from('form_submissions').select('*').eq('id', id).maybeSingle()) as RecordRow | null;
@@ -336,7 +372,7 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     async saveRecord(input) {
       const me = unwrap(await sb.from('profiles').select('organization_id').eq('id', await uid()).single()) as { organization_id: string };
       const answers = await uploadDataUrls(input.answers, `${me.organization_id}/${input.id}`);
-      const row = { project_id: input.project_id, answers, status: input.status };
+      const row = { project_id: input.project_id, vehicle_id: input.vehicle_id ?? null, answers, status: input.status };
       const q = input.isNew
         ? sb.from('form_submissions').insert({ id: input.id, template_version_id: input.template_version_id, ...row })
         : sb.from('form_submissions').update(row).eq('id', input.id);

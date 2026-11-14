@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { AlertTriangle, Camera, Eraser, ImagePlus, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api';
+import { perthNowLocal, perthToday } from '../../lib/labels';
 import type { LookupValue, Question, TableColumn, TemplateSchema } from '../../lib/types';
 import { Button, Input, Select, Textarea } from '../ui';
 
@@ -267,6 +268,16 @@ export function QuestionInput({ q, answers, setAnswer, errors }: { q: Question; 
           <Input id={`q-${q.id}`} type="number" inputMode="decimal" min={q.min} max={q.max} value={(v as string) ?? ''}
             onChange={(e) => setAnswer(q.id, e.target.value)} className="max-w-[200px]" />
           {q.unit && <span className="text-sm font-semibold text-steel-500">{q.unit}</span>}
+        </div>
+      )}
+      {(q.type === 'date' || q.type === 'datetime') && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input id={`q-${q.id}`} type={q.type === 'date' ? 'date' : 'datetime-local'} value={(v as string) ?? ''}
+            max={q.type === 'date' ? perthToday() : undefined}
+            onChange={(e) => setAnswer(q.id, e.target.value)} className="max-w-[260px]" />
+          <Button type="button" variant="secondary" onClick={() => setAnswer(q.id, q.type === 'date' ? perthToday() : perthNowLocal())}>
+            {q.type === 'date' ? 'Today' : 'Now'}
+          </Button>
         </div>
       )}
       {q.type === 'dropdown' && (

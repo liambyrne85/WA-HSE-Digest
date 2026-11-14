@@ -1,9 +1,9 @@
 import type { Api, DemoAccount, Session } from './types';
 import { buildDemoSeed, type DemoDb } from './demoSeed';
-import { computeSummary, MODULE_PREFIX, nextStatus, resolveSubmitStatus, ruleRecord } from '../recordsLogic';
-import { perthToday } from '../labels';
+import { computeSummary, MODULE_PREFIX, nextStatus, recordDateFor, resolveSubmitStatus, ruleRecord } from '../recordsLogic';
+import { addDays, perthToday } from '../labels';
 import type {
-  FormTemplate, FormTemplateVersion, Profile, ProjectMember, RecordApproval, RecordRow, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  FormTemplate, FormTemplateVersion, Investigation, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -11,7 +11,7 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v3';
+const DB_KEY = 'fieldops-demo-db-v4';
 const SESSION_KEY = 'fieldops-demo-session';
 
 const uuid = () =>
@@ -73,7 +73,18 @@ export function createDemoApi(): Api {
     if (s) session = JSON.parse(s);
   } catch { /* ignore */ }
 
-  const commit = () => save(db);
+  const changeListeners = new Set<() => void>();
+  const commit = () => { save(db); changeListeners.forEach((f) => setTimeout(f, 0)); };
+  // Other tabs on the same demo: pick up their changes (stands in for Supabase realtime).
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (e.key !== DB_KEY || !e.newValue) return;
+      try { db = JSON.parse(e.newValue) as DemoDb; changeListeners.forEach((f) => setTimeout(f, 0)); } catch { /* ignore */ }
+    });
+  }
+  const eventCategories = () => Object.fromEntries(db.lookupValues.filter((v) => v.list_key === 'event_types' && v.metadata?.category)
+    .map((v) => [v.label.toLowerCase(), String(v.metadata!.category)]));
+  const perthDay = (d: Date) => perthToday(d);
   const emit = () => listeners.forEach((l) => l(session));
 
   const me = (): Profile | undefined => db.profiles.find((p) => p.id === session?.userId && p.is_active);
@@ -190,8 +201,9 @@ export function createDemoApi(): Api {
     if (!prev || prev.status !== row.status) runRules(row.module, 'status_changed', rec, old);
   };
   const recordsApi = {
-    async listRecords(module?: WorkflowModule) {
-      return delay(db.records.filter((r) => canSee(r) && (!module || r.module === module))
+    async listRecords(module?: WorkflowModule, range?: { from?: string; to?: string }) {
+      return delay(db.records.filter((r) => canSee(r) && !r.archived_at && (!module || r.module === module)
+        && (!range?.from || (r.record_date ?? '') >= range.from) && (!range?.to || (r.record_date ?? '9999') <= range.to))
         .sort((a, b) => b.created_at.localeCompare(a.created_at)));
     },
     async getRecord(id: string) {
@@ -207,7 +219,7 @@ export function createDemoApi(): Api {
     async getTemplateVersion(id: string) {
       return delay(db.versions.find((v) => v.id === id) ?? null);
     },
-    async saveRecord(input: { id: string; template_version_id: string; project_id: string | null; answers: Record<string, unknown>; status: string; isNew: boolean }) {
+    async saveRecord(input: { id: string; template_version_id: string; project_id: string | null; vehicle_id?: string | null; answers: Record<string, unknown>; status: string; isNew: boolean }) {
       const m = requireMe();
       const version = db.versions.find((v) => v.id === input.template_version_id);
       if (!version) throw new Error('Template version not found');
@@ -219,7 +231,11 @@ export function createDemoApi(): Api {
           throw new Error('This record can no longer be edited');
         }
       }
-      const summary = computeSummary(version.schema, input.answers);
+      const vehicleId = input.vehicle_id ?? prev?.vehicle_id ?? null;
+      if (vehicleId && vehicleId !== prev?.vehicle_id && !db.vehicles.some((v) => v.id === vehicleId && v.is_active && !v.archived_at)) {
+        throw new Error('That vehicle is not in the active vehicle register');
+      }
+      const summary = computeSummary(version.schema, input.answers, eventCategories());
       const module = version.category as WorkflowModule;
       if (!isLeader() && !['draft', 'submitted'].includes(input.status)) throw new Error(`Only Admin or HSET can move a record to "${input.status}"`);
       let status: string = input.status;
@@ -230,18 +246,29 @@ export function createDemoApi(): Api {
       }
       let row: RecordRow;
       if (prev) {
-        row = { ...prev, project_id: input.project_id, answers: input.answers, summary, status, submitted_at, updated_at: nowIso(),
-          last_status_change_at: prev.status !== status ? nowIso() : prev.last_status_change_at };
+        row = { ...prev, project_id: input.project_id, vehicle_id: vehicleId, answers: input.answers, summary, status, submitted_at, updated_at: nowIso(),
+          last_status_change_at: prev.status !== status ? nowIso() : prev.last_status_change_at,
+          record_date: recordDateFor(summary, submitted_at, prev.created_at, perthDay) };
         db.records = db.records.map((r) => (r.id === row.id ? row : r));
       } else {
         const n = (db.counters[module] ?? 0) + 1;
         db.counters[module] = n;
         row = { id: input.id, template_version_id: version.id, module, reference: `${MODULE_PREFIX[module]}-${String(n).padStart(5, '0')}`,
           title: version.name, project_id: input.project_id, organization_id: m.organization_id, submitted_by: m.id, status,
-          answers: input.answers, summary, submitted_at, created_at: nowIso(), updated_at: nowIso(), last_status_change_at: nowIso() };
+          answers: input.answers, summary, submitted_at, created_at: nowIso(), updated_at: nowIso(), last_status_change_at: nowIso(),
+          vehicle_id: vehicleId, record_date: recordDateFor(summary, submitted_at, nowIso(), perthDay) };
         db.records.push(row);
       }
       afterWrite(row, prev);
+      // A submitted pre-start with a failed critical item tags its vehicle out of service.
+      if (row.module === 'plant_prestart' && row.vehicle_id && row.status !== 'draft' && Number(row.summary.critical_failures) > 0
+        && (!prev || prev.status === 'draft' || prev.status !== row.status)) {
+        const v = db.vehicles.find((x) => x.id === row.vehicle_id);
+        if (v && v.status !== 'out_of_service') {
+          Object.assign(v, { status: 'out_of_service', out_of_service_reason: `Critical item failed on pre-start ${row.reference}`,
+            out_of_service_at: nowIso(), out_of_service_record_id: row.id });
+        }
+      }
       commit();
       return delay(row);
     },
@@ -338,20 +365,80 @@ export function createDemoApi(): Api {
     },
   };
 
-  // Seed a few sample records the first time so lists aren't empty.
+  // Seed a realistic week of records the first time so lists and the dashboard aren't empty.
   if (!db.records.length && !(db as Partial<DemoDb>).counters?.safety_event) {
-    const ver = (cat: string) => db.versions.find((v) => v.category === cat)!;
+    const ver = (name: string) => db.versions.find((v) => v.name === name)!;
     const asUser = (uid: string, fn: () => void) => { const s = session; session = { userId: uid, email: '' }; try { fn(); } finally { session = s; } };
-    const mk = (uid: string, cat: string, project: string | null, answers: Record<string, unknown>) => asUser(uid, () => {
-      void recordsApi.saveRecord({ id: uuid(), template_version_id: ver(cat).id, project_id: project, answers, status: 'submitted', isNew: true });
-    });
-    mk('u-emp', 'safety_event', 'p-1', { 'q-type': 'Near Miss', 'q-sev': 'High', 'q-desc': 'Scaffold tube dropped from lift 4 into the exclusion zone below the wharf deck. Nobody in the drop zone.', 'q-made-safe': 'yes', 'q-actions': 'Stopped work, checked toeboards and mesh on lift 4, re-briefed crew on tool tethering.' });
-    mk('u-acme1', 'daily_field_report', 'p-1', { 'q-shift': 'Day', 'q-weather': 'Hot (over 35°C)',
+    const mk = (uid: string, form: string, project: string | null, answers: Record<string, unknown>, opts: { daysAgo?: number; vehicle?: string } = {}) => {
+      const id = uuid();
+      asUser(uid, () => {
+        void recordsApi.saveRecord({ id, template_version_id: ver(form).id, project_id: project, vehicle_id: opts.vehicle ?? null, answers, status: 'submitted', isNew: true });
+      });
+      const rec = db.records.find((x) => x.id === id)!;
+      if (opts.daysAgo) {
+        const at = new Date(Date.now() - opts.daysAgo * 864e5).toISOString();
+        Object.assign(rec, { created_at: at, submitted_at: at, updated_at: at, last_status_change_at: at });
+        if (!rec.summary.record_date) rec.record_date = perthToday(new Date(at));
+        db.events.filter((e) => e.submission_id === id).forEach((e) => { e.created_at = at; });
+      }
+      return rec;
+    };
+    const day = (n: number) => addDays(perthToday(), -n);
+    const at = (n: number, hhmm: string) => `${day(n)}T${hhmm}`;
+    const pass = (ids: string[]) => Object.fromEntries(ids.map((k) => [k, 'pass']));
+    const vps = ['q-v-tyres', 'q-v-lights', 'q-v-fluids', 'q-v-body', 'q-v-load', 'q-v-brakes', 'q-v-belts', 'q-v-horn', 'q-v-kit', 'q-v-hiab'];
+
+    // Vehicle pre-starts: UTE-01 and TRK-04 done today; HIAB-03 failed today (tagged out); UTE-02 last done 3 days ago; UTE-05 never.
+    mk('u-emp', 'Vehicle Pre-Start', 'p-1', { 'q-v-odo': '48210', ...pass(vps), 'q-v-fit': 'yes' }, { vehicle: 'v-1' });
+    mk('u-emp2', 'Vehicle Pre-Start', 'p-2', { 'q-v-odo': '120455', ...pass(vps), 'q-v-fit': 'yes' }, { vehicle: 'v-4' });
+    mk('u-sup', 'Vehicle Pre-Start', 'p-1', { 'q-v-odo': '90880', ...pass(vps), 'q-v-hiab': 'fail', 'q-v-load': 'fail', 'q-v-fit': 'yes' }, { vehicle: 'v-3' });
+    mk('u-acme2', 'Vehicle Pre-Start', 'p-1', { 'q-v-odo': '33120', ...pass(vps), 'q-v-lights': 'fail', 'q-v-fit': 'yes' }, { vehicle: 'v-2', daysAgo: 3 });
+    mk('u-emp', 'Vehicle Pre-Start', 'p-1', { 'q-v-odo': '48001', ...pass(vps), 'q-v-fit': 'yes' }, { vehicle: 'v-1', daysAgo: 1 });
+
+    // Incidents: this week (every category) and earlier.
+    const se = (who: string, proj: string, n: number, type: string, sev: string, desc: string) =>
+      mk(who, 'Safety Event Report', proj, { 'q-when': at(n, '10:15'), 'q-type': type, 'q-sev': sev, 'q-desc': desc, 'q-made-safe': 'yes', 'q-actions': 'Area made safe and supervisor notified.' }, { daysAgo: n });
+    const today = perthToday();
+    const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+    const intoWeek = dow === 0 ? 6 : dow - 1; // days since Monday
+    const w = (n: number) => Math.min(n, intoWeek);
+    se('u-emp', 'p-1', w(0), 'Near Miss', 'High', 'Scaffold tube dropped from lift 4 into the exclusion zone below the wharf deck. Nobody in the drop zone.');
+    const fai = se('u-acme2', 'p-1', w(1), 'First Aid Injury', 'Low', 'Pinched finger between coupler and tube while adjusting a transom.');
+    se('u-emp2', 'p-2', w(2), 'Property / Plant Damage', 'Medium', 'Mobile scaffold castor wheel collapsed while being moved; no one on the platform.');
+    se('u-sup', 'p-1', w(1), 'Vehicle / Plant Incident', 'Medium', 'HIAB boom contacted the wharf handrail while unloading tube.');
+    se('u-emp2', 'p-2', w(3), 'Environmental Incident', 'Low', 'Small hydraulic oil leak from the HIAB onto the laydown pad; spill kit used.');
+    const lti = se('u-acme2', 'p-1', 20, 'Lost Time Injury', 'High', 'Rolled ankle stepping off the bottom lift; off work two days.');
+    const older = se('u-emp', 'p-1', 9, 'Near Miss', 'Medium', 'Unsecured ladder slipped at the base on the access tower.');
+
+    // Investigations: one open, one overdue, one closed.
+    const inv = (incident: RecordRow, lead: string, due: string, status: Investigation['status'], extra: Partial<Investigation> = {}) => {
+      db.invCounter += 1;
+      db.investigations.push({ id: uuid(), reference: `INV-${String(db.invCounter).padStart(5, '0')}`, incident_id: incident.id,
+        project_id: incident.project_id, organization_id: incident.organization_id, lead_id: lead, status, due_date: due,
+        findings: null, root_cause: null, corrective_actions: null, opened_at: incident.submitted_at ?? nowIso(),
+        closed_at: status === 'closed' ? nowIso() : null, created_at: incident.submitted_at ?? nowIso(), ...extra });
+      if (status !== 'closed') incident.status = 'under_investigation';
+    };
+    inv(fai, 'u-sup', addDays(fai.record_date!, 14), 'open');
+    inv(lti, 'u-pm', addDays(lti.record_date!, 14), 'in_progress', { findings: 'Bottom lift step-off height was 600 mm with no intermediate step.' });
+    inv(older, 'u-hset', addDays(older.record_date!, 14), 'closed', { findings: 'Ladder not tied off.', corrective_actions: 'Ladder ties checked at every handover inspection.' });
+
+    // Field leadership this week and last.
+    const fl = (who: string, proj: string, n: number, type: string, obs: string) =>
+      mk(who, 'Field Leadership', proj, { 'q-fl-date': day(n), 'q-fl-type': type, 'q-fl-obs': obs }, { daysAgo: n });
+    fl('u-sup', 'p-1', w(0), 'Toolbox talk', 'Dropped objects: tool tethering and toeboards before work at lift 4.');
+    fl('u-sup', 'p-1', w(1), 'Site safety walk', 'Exclusion zone barriers at berth 3 in good order.');
+    fl('u-pm', 'p-2', w(2), 'Critical risk control verification', 'Checked tie spacing on tank 2 scaffold against the design.');
+    fl('u-acme1', 'p-1', w(0), 'Safety interaction / conversation', 'Discussed harness checks with the Acme crew.');
+    fl('u-acme1', 'p-1', w(1), 'Scaffold inspection observation', 'Observed the handover inspection on bays 12–16.');
+    fl('u-hset', 'p-1', w(2), 'Audit', 'Monthly HSET audit of the wharf scaffolds.');
+    fl('u-hset', 'p-2', w(1), 'Site safety walk', 'Karratha shutdown laydown walk.');
+    fl('u-sup', 'p-1', 8, 'Pre-start meeting', 'Last week pre-start.');
+
+    mk('u-acme1', 'Daily Field Report', 'p-1', { 'q-shift': 'Day', 'q-weather': 'Hot (over 35°C)',
       'q-crew': [{ name: 'Alice Nguyen', role: 'Supervisor', hours: '10' }, { name: 'Ravi Patel', role: 'Scaffolder', hours: '10' }],
       'q-plant': [{ plant: 'HIAB-03 truck', plant_hours: '3' }], 'q-work': 'Erected hung scaffold bays 12–16 under berth 3. Handover inspection booked.', 'q-incidents': 'no' });
-    mk('u-acme1', 'plant_prestart', 'p-2', { 'q-plant': 'Excavator', 'q-fleet': 'EX-12', 'q-hours': '4521', 'q-fluids': 'pass', 'q-leaks': 'pass', 'q-tracks': 'pass', 'q-glass': 'pass',
-      'q-seatbelt': 'pass', 'q-alarm': 'fail', 'q-brakes': 'pass', 'q-fire': 'yes', 'q-fit': 'yes' });
-    db.notifications = db.notifications.filter((n) => !n.body?.match(/^(SE|DFR|PS)-/) || ['u-admin', 'u-hset'].includes(n.user_id));
+    db.notifications = db.notifications.filter((n) => !n.body?.match(/^(SE|DFR|PS|FL)-/) || ['u-admin', 'u-hset'].includes(n.user_id));
     commit();
   }
 
@@ -553,7 +640,10 @@ export function createDemoApi(): Api {
     async listAudit(table, recordId) {
       const m = me();
       if (!m) return delay([]);
-      if (!isLeader() && !(table === 'profiles' && recordId === m.id)) return delay([]);
+      const visible = isLeader() || (table === 'profiles' && recordId === m.id)
+        || (table === 'vehicles' && (await this.listVehicles()).some((v) => v.id === recordId))
+        || (table === 'investigations' && (await this.listInvestigations()).some((i) => i.id === recordId));
+      if (!visible) return delay([]);
       return delay(db.audit.filter((a) => a.table_name === table && a.record_id === recordId));
     },
     async uploadPersonFile(profileId, file) {
@@ -817,6 +907,96 @@ export function createDemoApi(): Api {
     },
 
     ...recordsApi,
+
+    // ---- vehicles / investigations / targets -------------------------------
+    async listVehicles() {
+      if (!me()) return delay([]);
+      return delay(db.vehicles.filter((v) => !v.archived_at && (isLeader() || v.operator_id === session?.userId
+        || (!!v.project_id && canAccessProject(v.project_id) && (isInternal() || (!!v.operator_id && canSeePerson(v.operator_id)))))).sort((a, b) => a.fleet_number.localeCompare(b.fleet_number)));
+    },
+    async saveVehicle(v) {
+      requireMe();
+      const canEdit = (x: Partial<Vehicle>) => isLeader() || (isProjectLead() && !!x.project_id && myProjectIds().includes(x.project_id)
+        && (isInternal() || (!!x.operator_id && canSeePerson(x.operator_id))));
+      if (v.id) {
+        const ex = db.vehicles.find((x) => x.id === v.id);
+        if (!ex || !canEdit(ex)) throw new Error('You can only change vehicles on your projects');
+        if (v.project_id !== undefined && v.project_id !== ex.project_id && !isLeader()) throw new Error('Only Admin or HSET can move a vehicle to another project');
+        const next = { ...ex, ...v };
+        audit('vehicles', ex.id, 'update', { ...ex }, next);
+        Object.assign(ex, next);
+        commit();
+        return delay(ex);
+      }
+      if (!isLeader()) throw new Error('Only Admin or HSET can add vehicles');
+      if (!v.fleet_number?.trim()) throw new Error('Fleet number is required');
+      if (db.vehicles.some((x) => !x.archived_at && x.fleet_number.toLowerCase() === v.fleet_number!.trim().toLowerCase())) throw new Error('That fleet number is already in the register');
+      const row: Vehicle = { id: uuid(), fleet_number: v.fleet_number.trim(), rego: v.rego ?? null, vehicle_type: v.vehicle_type ?? null,
+        project_id: v.project_id ?? null, operator_id: v.operator_id ?? null, is_active: v.is_active ?? true,
+        daily_prestart_required: v.daily_prestart_required ?? true, status: v.status ?? 'in_service', out_of_service_reason: v.out_of_service_reason ?? null,
+        out_of_service_at: null, out_of_service_record_id: null, notes: v.notes ?? null, archived_at: null, created_at: nowIso() };
+      db.vehicles.push(row);
+      audit('vehicles', row.id, 'insert', null, row);
+      commit();
+      return delay(row);
+    },
+    async listInvestigations() {
+      if (!me()) return delay([]);
+      return delay(db.investigations.filter((i) => {
+        const inc = db.records.find((r) => r.id === i.incident_id);
+        return isLeader() || i.lead_id === session?.userId || (!!inc && canSee(inc));
+      }).sort((a, b) => b.opened_at.localeCompare(a.opened_at)));
+    },
+    async saveInvestigation(i) {
+      const m = requireMe();
+      if (i.id) {
+        const ex = db.investigations.find((x) => x.id === i.id);
+        const inc = ex && db.records.find((r) => r.id === ex.incident_id);
+        if (!ex || !(isLeader() || ex.lead_id === m.id || (isProjectLead() && !!inc && canSee(inc)))) throw new Error('Permission denied');
+        const next = { ...ex, ...i, incident_id: ex.incident_id, reference: ex.reference, project_id: ex.project_id };
+        if (next.status === 'closed' && ex.status !== 'closed') next.closed_at = nowIso();
+        if (next.status !== 'closed') next.closed_at = null;
+        audit('investigations', ex.id, 'update', { ...ex }, next);
+        Object.assign(ex, next);
+        commit();
+        return delay(ex);
+      }
+      const inc = db.records.find((r) => r.id === i.incident_id);
+      if (!inc || inc.module !== 'safety_event') throw new Error('Investigations must be linked to a safety event');
+      if (!(isLeader() || (isProjectLead() && canSee(inc)))) throw new Error('Only Admin, HSET or a project lead can open an investigation');
+      if (db.investigations.some((x) => x.incident_id === inc.id)) throw new Error('This incident already has an investigation');
+      db.invCounter += 1;
+      const row: Investigation = { id: uuid(), reference: `INV-${String(db.invCounter).padStart(5, '0')}`, incident_id: inc.id,
+        project_id: inc.project_id, organization_id: inc.organization_id, lead_id: i.lead_id ?? null, status: i.status ?? 'open',
+        due_date: i.due_date ?? addDays(inc.record_date ?? perthToday(), 14), findings: null, root_cause: null, corrective_actions: null,
+        opened_at: nowIso(), closed_at: null, created_at: nowIso() };
+      db.investigations.push(row);
+      if (['submitted', 'draft'].includes(inc.status)) {
+        const prevInc = { ...inc };
+        inc.status = 'under_investigation';
+        logEvent(inc.id, 'status', { from_status: prevInc.status, to_status: inc.status });
+      }
+      logEvent(inc.id, 'comment', { body: `Investigation ${row.reference} opened` });
+      audit('investigations', row.id, 'insert', null, row);
+      commit();
+      return delay(row);
+    },
+    async listTargets() {
+      if (!me()) return delay([]);
+      return delay(db.targets.filter((t) => canSeePerson(t.profile_id)));
+    },
+    async saveTarget(t) {
+      requireAdmin();
+      const ex = db.targets.find((x) => x.profile_id === t.profile_id);
+      audit('leadership_targets', t.profile_id, ex ? 'update' : 'insert', ex ? { ...ex } : null, t);
+      if (ex) Object.assign(ex, t); else db.targets.push({ ...t });
+      commit();
+      await delay(null);
+    },
+    subscribeChanges(cb) {
+      changeListeners.add(cb);
+      return () => { changeListeners.delete(cb); };
+    },
 
     // ---- notifications ---------------------------------------------------
     async listNotifications() {

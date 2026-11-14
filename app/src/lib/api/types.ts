@@ -1,5 +1,5 @@
 import type {
-  AppRole, AppSettings, AuditEntry, DirectoryEntry, FormTemplate, ProjectMember, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
+  AppRole, AppSettings, AuditEntry, Investigation, LeadershipTarget, Vehicle, DirectoryEntry, FormTemplate, ProjectMember, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
   LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
   WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger, RecordApproval, RecordEvent, RecordRow,
 } from '../types';
@@ -9,6 +9,7 @@ export interface RecordInput {
   id: string;
   template_version_id: string;
   project_id: string | null;
+  vehicle_id?: string | null;
   answers: Record<string, unknown>;
   /** 'draft' or 'submitted' (the server picks the real submitted status); leaders editing an
    *  in-progress record pass its current status to keep it unchanged */
@@ -154,7 +155,18 @@ export interface Api {
   archiveTicket(id: string): Promise<void>;
 
   // records (field modules)
-  listRecords(module?: WorkflowModule): Promise<RecordRow[]>;
+  /** range filters on record_date (YYYY-MM-DD, inclusive) */
+  listRecords(module?: WorkflowModule, range?: { from?: string; to?: string }): Promise<RecordRow[]>;
+
+  // vehicles, investigations, field leadership targets
+  listVehicles(): Promise<Vehicle[]>;
+  saveVehicle(v: Partial<Vehicle>): Promise<Vehicle>;
+  listInvestigations(): Promise<Investigation[]>;
+  saveInvestigation(i: Partial<Investigation>): Promise<Investigation>;
+  listTargets(): Promise<LeadershipTarget[]>;
+  saveTarget(t: LeadershipTarget): Promise<void>;
+  /** call cb whenever records, vehicles, investigations or targets change (live dashboard) */
+  subscribeChanges(cb: () => void): () => void;
   getRecord(id: string): Promise<RecordDetail | null>;
   getTemplateVersion(id: string): Promise<FormTemplateVersion | null>;
   saveRecord(input: RecordInput): Promise<RecordRow>;

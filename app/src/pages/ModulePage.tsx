@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { AlertTriangle, ArrowRight, ClipboardList, Clock, Plus, Search } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ClipboardList, Clock, Plus, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Badge, Button, EmptyState, ErrorBanner, Input, Modal, PageHeader, Select, Spinner } from '../components/ui';
@@ -16,11 +16,12 @@ const COPY: Partial<Record<WorkflowModule, string>> = {
   plant_prestart: 'Operators check plant before use. A failed critical item reports a defect and alerts Leaders.',
   risk_assessment: 'Take 5 / step-back assessments before starting a task.',
   audit: 'Site inspections scored against your checklists.',
+  field_leadership: 'Toolbox talks, safety walks, critical control checks and other field leadership. Counts towards your target on the dashboard.',
 };
 
 export const NOUN: Partial<Record<WorkflowModule, string>> = {
   safety_event: 'safety event', daily_field_report: 'daily field report', timesheet: 'timesheet',
-  plant_prestart: 'pre-start', risk_assessment: 'risk assessment', audit: 'audit',
+  plant_prestart: 'pre-start', risk_assessment: 'risk assessment', audit: 'audit', field_leadership: 'field leadership activity',
 };
 
 export function StatusBadge({ status, statuses }: { status: string; statuses?: PipelineStatus[] }) {
@@ -48,7 +49,10 @@ export default function ModulePage({ module }: { module: WorkflowModule }) {
   const { profile, isLeader } = useAuth();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [filter, setFilter] = useState<Filter>('open');
+  const by = params.get('by') ?? '';
+  const from = params.get('from') ?? '';
+  const to = params.get('to') ?? '';
+  const [filter, setFilter] = useState<Filter>(by || from ? 'all' : 'open');
   const [mine, setMine] = useState(false);
   const [projectId, setProjectId] = useState('');
   const [q, setQ] = useState('');
@@ -87,10 +91,13 @@ export default function ModulePage({ module }: { module: WorkflowModule }) {
     if (filter !== 'open' && filter !== 'all' && r.status !== filter) return false;
     if (mine && r.submitted_by !== profile?.id) return false;
     if (projectId && r.project_id !== projectId) return false;
+    if (by && r.submitted_by !== by) return false;
+    if (from && (r.record_date ?? '') < from) return false;
+    if (to && (r.record_date ?? '') > to) return false;
     const s = q.trim().toLowerCase();
     return !s || [r.reference, r.title, JSON.stringify(r.summary)].some((x) => x?.toLowerCase().includes(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [data, filter, mine, projectId, q]);
+  }), [data, filter, mine, projectId, q, by, from, to]);
 
   const projectName = (id: string | null) => data?.projects.find((p) => p.id === id)?.name;
   const person = (id: string) => data?.people.find((p) => p.id === id)?.full_name ?? (id === profile?.id ? profile?.full_name : 'Team member');
@@ -129,6 +136,13 @@ export default function ModulePage({ module }: { module: WorkflowModule }) {
               ))}
             </div>
           </div>
+          {(by || from || to) && (
+            <button type="button" onClick={() => { ['by', 'from', 'to'].forEach((k) => params.delete(k)); setParams(params, { replace: true }); }}
+              className="mb-3 inline-flex min-h-[40px] items-center gap-2 rounded-full bg-brand-100 px-3.5 text-sm font-semibold text-brand-800">
+              {[by && person(by), (from || to) && `${formatDate(from || null)} – ${formatDate(to || null)}`].filter(Boolean).join(' · ')}
+              <X className="h-4 w-4" />
+            </button>
+          )}
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-steel-400" />
@@ -160,7 +174,7 @@ export default function ModulePage({ module }: { module: WorkflowModule }) {
                       </div>
                       <p className="mt-1 truncate font-bold text-steel-900">{r.title}</p>
                       <p className="truncate text-xs text-steel-500">
-                        {[projectName(r.project_id), person(r.submitted_by), formatDate(r.submitted_at ?? r.created_at)].filter(Boolean).join(' · ')}
+                        {[projectName(r.project_id), person(r.submitted_by), formatDate(r.record_date ?? r.submitted_at ?? r.created_at)].filter(Boolean).join(' · ')}
                       </p>
                     </div>
                     <ArrowRight className="h-5 w-5 shrink-0 text-steel-400" />

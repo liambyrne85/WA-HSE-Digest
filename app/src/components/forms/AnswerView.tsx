@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { formatAnswerDate } from '../../lib/labels';
 import type { Question, TemplateSchema } from '../../lib/types';
 import { Badge } from '../ui';
 
@@ -31,6 +32,9 @@ function Value({ q, v }: { q: Question; v: unknown }) {
       return <Badge color={v === 'pass' ? 'green' : v === 'fail' ? 'red' : 'slate'}>{v === 'na' ? 'N/A' : String(v)}</Badge>;
     case 'yes_no':
       return <Badge color={v === 'yes' ? 'green' : 'red'}>{String(v)}</Badge>;
+    case 'date':
+    case 'datetime':
+      return <span className="font-semibold tabular-nums">{formatAnswerDate(String(v))}</span>;
     case 'number':
       return <span className="font-semibold tabular-nums">{String(v)}{q.unit ? ` ${q.unit}` : ''}</span>;
     case 'photo':

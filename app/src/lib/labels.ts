@@ -42,6 +42,7 @@ export const TEMPLATE_CATEGORY: Record<TemplateCategory, { label: string; color:
   daily_field_report: { label: 'Daily Field Report', color: 'blue' },
   timesheet: { label: 'Timesheet', color: 'green' },
   training: { label: 'Training Record', color: 'slate' },
+  field_leadership: { label: 'Field Leadership', color: 'purple' },
 };
 
 export const TEMPLATE_STATUS: Record<TemplateStatus, { label: string; color: BadgeColor }> = {
@@ -59,6 +60,8 @@ export const QUESTION_TYPE: Record<QuestionType, { label: string; hint: string }
   photo: { label: 'Photo Upload', hint: 'Camera / photo required' },
   signature: { label: 'Digital Signature', hint: 'Sign on screen' },
   table: { label: 'Table (rows)', hint: 'Crew, plant, hours' },
+  date: { label: 'Date', hint: 'Pick a day' },
+  datetime: { label: 'Date & time', hint: 'Day and time' },
 };
 
 export const MODULE_LABEL: Record<WorkflowModule, string> = {
@@ -69,6 +72,7 @@ export const MODULE_LABEL: Record<WorkflowModule, string> = {
   risk_assessment: 'Risk Assessments',
   timesheet: 'Timesheets / Hours',
   training: 'Training & Tickets',
+  field_leadership: 'Field Leadership',
 };
 
 export const TRIGGER_LABEL: Record<WorkflowTrigger, string> = {
@@ -120,6 +124,23 @@ export const MODULE_FIELDS: Record<WorkflowModule, { key: string; label: string;
   ],
   timesheet: [{ key: 'total_hours', label: 'Total hours' }, { key: 'cost_code', label: 'Cost code', lookup: 'cost_codes' }],
   training: [{ key: 'ticket_type', label: 'Ticket type', lookup: 'ticket_types' }],
+  field_leadership: [{ key: 'activity_type', label: 'Activity type', lookup: 'leadership_activities' }],
+};
+
+/** Incident categories for the dashboard; each event type maps to one (lookup metadata.category). */
+export const INCIDENT_CATEGORY: Record<string, { label: string; color: BadgeColor }> = {
+  injury: { label: 'Injury', color: 'red' },
+  near_miss: { label: 'Near miss', color: 'amber' },
+  property_damage: { label: 'Property damage', color: 'orange' },
+  vehicle_plant: { label: 'Vehicle / plant', color: 'blue' },
+  environmental: { label: 'Environmental', color: 'green' },
+};
+
+export const INVESTIGATION_STATUS: Record<string, { label: string; color: BadgeColor }> = {
+  open: { label: 'Open', color: 'red' },
+  in_progress: { label: 'In progress', color: 'amber' },
+  review: { label: 'In review', color: 'blue' },
+  closed: { label: 'Closed', color: 'green' },
 };
 
 export const LOOKUP_FIELD: Record<string, string> = {
@@ -135,6 +156,7 @@ export const MODULE_ROUTE: Partial<Record<WorkflowModule, string>> = {
   plant_prestart: '/prestart',
   risk_assessment: '/risk',
   audit: '/audits',
+  field_leadership: '/leadership',
 };
 
 // ---- Dates: DD/MM/YYYY, Australia/Perth, weeks Monday–Sunday ---------------
@@ -178,6 +200,22 @@ export function formatDateTime(d: string | null | undefined) {
   }).formatToParts(new Date(d));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
   return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`;
+}
+
+/** Current Perth wall-clock time as YYYY-MM-DDTHH:mm (the value of a datetime-local input). */
+export function perthNowLocal(at: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(at);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+
+/** A form answer: YYYY-MM-DD → DD/MM/YYYY, YYYY-MM-DDTHH:mm (Perth wall clock) → DD/MM/YYYY HH:mm. */
+export function formatAnswerDate(v: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(v);
+  if (!m) return v;
+  return `${m[3]}/${m[2]}/${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ''}`;
 }
 
 /** Whole days from today (Perth) to a date; negative = in the past. */

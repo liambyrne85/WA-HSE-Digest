@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { FormRenderer, type Answers } from '../components/forms/FormRenderer';
@@ -23,23 +23,31 @@ export default function RecordFormPage() {
   const toast = useToast();
   const [projectId, setProjectId] = useState<string>('');
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [vehicleId, setVehicleId] = useState<string>(params.get('vehicle') ?? '');
+  const [vehicleError, setVehicleError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [recordId] = useState(() => id ?? newId());
 
   const { data, loading, error } = useAsync(async () => {
-    const projects = (await api.listProjects()).filter((p) => p.is_active);
+    const [projects, vehicles] = await Promise.all([
+      api.listProjects().then((ps) => ps.filter((p) => p.is_active)),
+      api.listVehicles().then((vs) => vs.filter((v) => v.is_active)).catch(() => []),
+    ]);
     if (id) {
       const d = await api.getRecord(id);
       if (!d) throw new Error('Record not found');
       setProjectId(d.record.project_id ?? '');
-      return { version: d.version, answers: d.record.answers as Answers, record: d.record, projects };
+      setVehicleId(d.record.vehicle_id ?? '');
+      return { version: d.version, answers: d.record.answers as Answers, record: d.record, projects, vehicles };
     }
     const t = await api.getTemplate(templateId ?? '');
     if (!t?.current_version_id) throw new Error('That form is not published');
     const version = await api.getTemplateVersion(t.current_version_id);
     if (!version) throw new Error('That form is not published');
-    if (projects.length === 1) setProjectId(projects[0]!.id);
-    return { version, answers: {} as Answers, record: null, projects };
+    const preVehicle = vehicles.find((v) => v.id === params.get('vehicle'));
+    if (preVehicle?.project_id && projects.some((p) => p.id === preVehicle.project_id)) setProjectId(preVehicle.project_id);
+    else if (projects.length === 1) setProjectId(projects[0]!.id);
+    return { version, answers: {} as Answers, record: null, projects, vehicles };
   }, [id, templateId]);
 
   const save = async (answers: Answers, requested: 'draft' | 'submitted') => {
@@ -52,10 +60,15 @@ export default function RecordFormPage() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+    if (requested === 'submitted' && data.version.schema.settings?.requireVehicle && !vehicleId) {
+      setVehicleError('Choose the vehicle or plant');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setBusy(true);
     try {
       const row = await api.saveRecord({
-        id: recordId, template_version_id: data.version.id, project_id: projectId || null, answers, status, isNew: !id,
+        id: recordId, template_version_id: data.version.id, project_id: projectId || null, vehicle_id: vehicleId || null, answers, status, isNew: !id,
       });
       toast(inProgress ? `${row.reference} updated` : status === 'draft' ? `Draft saved (${row.reference})` : `${row.reference} submitted`);
       nav(`/records/${row.id}`, { replace: true });
@@ -95,7 +108,30 @@ export default function RecordFormPage() {
         onSubmit={(a) => save(a, 'submitted')}
         onSaveDraft={!data.record || data.record.status === 'draft' ? (a) => save(a, 'draft') : undefined}
         header={
-          <div className="rounded-xl border-2 border-steel-200 bg-white p-4">
+          <div className="space-y-4 rounded-xl border-2 border-steel-200 bg-white p-4">
+            {(data.version.schema.settings?.requireVehicle || vehicleId) && (
+              <div>
+                <Field label="Vehicle / plant" required={!!data.version.schema.settings?.requireVehicle} error={vehicleError}>
+                  <Select value={vehicleId} onChange={(e) => {
+                    const v = data.vehicles.find((x) => x.id === e.target.value);
+                    setVehicleId(e.target.value); setVehicleError(null);
+                    if (v?.project_id && data.projects.some((p) => p.id === v.project_id)) { setProjectId(v.project_id); setProjectError(null); }
+                  }}>
+                    <option value="">Select vehicle…</option>
+                    {data.vehicles.map((v) => (
+                      <option key={v.id} value={v.id}>{v.fleet_number}{v.rego ? ` (${v.rego})` : ''}{v.vehicle_type ? ` – ${v.vehicle_type}` : ''}{v.status === 'out_of_service' ? ' – OUT OF SERVICE' : ''}</option>
+                    ))}
+                  </Select>
+                </Field>
+                {data.vehicles.find((v) => v.id === vehicleId)?.status === 'out_of_service' && (
+                  <p className="mt-2 flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    Tagged out of service: {data.vehicles.find((v) => v.id === vehicleId)?.out_of_service_reason ?? 'see the vehicle register'}. Do not operate until it is returned to service.
+                  </p>
+                )}
+                {!data.vehicles.length && <p className="mt-2 text-xs text-steel-500">No vehicles on your projects yet. Ask Admin or HSET to add them to the vehicle register.</p>}
+              </div>
+            )}
             <Field label="Project / site" required={!!data.version.schema.settings?.requireProject} error={projectError}>
               <Select value={projectId} onChange={(e) => { setProjectId(e.target.value); setProjectError(null); }}>
                 <option value="">Select project…</option>
