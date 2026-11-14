@@ -32,8 +32,9 @@ export default function ActionDetailPage() {
   const { data, loading, error, reload } = useAsync(async () => {
     const a = await api.getAction(id!);
     if (!a) throw new Error("This action doesn't exist or you don't have access to it.");
-    const [people, audit] = await Promise.all([api.listDirectory(), api.listAudit('actions', a.id).catch(() => [] as AuditEntry[])]);
-    return { a, people, audit };
+    const [people, audit, assignable] = await Promise.all([api.listDirectory(), api.listAudit('actions', a.id).catch(() => [] as AuditEntry[]),
+      api.listAssignable(a.project_id).catch(() => [])]);
+    return { a, people: [...people, ...assignable.filter((x) => !people.some((p) => p.id === x.id))], assignable, audit };
   }, [id]);
 
   if (loading && !data) return <Spinner />;
@@ -165,7 +166,7 @@ export default function ActionDetailPage() {
             <Field label="Details"><Textarea value={editing.description ?? ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field>
             <Field label="Assigned to">
               <Select value={editing.assignee_id} onChange={(e) => setEditing({ ...editing, assignee_id: e.target.value })}>
-                {[...data.people].sort((x, y) => x.full_name.localeCompare(y.full_name)).map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                {[...data.assignable, ...data.people.filter((p) => p.id === editing.assignee_id && !data.assignable.some((x) => x.id === p.id))].map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
               </Select>
             </Field>
             <Field label="Close out by"><Input type="date" min={perthToday()} value={editing.due_date} onChange={(e) => setEditing({ ...editing, due_date: e.target.value })} /></Field>

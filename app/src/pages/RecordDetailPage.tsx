@@ -147,7 +147,7 @@ export default function RecordDetailPage() {
           <AnswerView schema={version.schema} answers={r.answers} />
 
           {['safety_event', 'audit', 'field_leadership'].includes(r.module) && r.status !== 'draft' && (
-            <ActionsPanel submissionId={r.id} canRaise={isLeader || isProjectLead || isOwner} />
+            <ActionsPanel submissionId={r.id} projectId={r.project_id} canRaise />
           )}
         </div>
 

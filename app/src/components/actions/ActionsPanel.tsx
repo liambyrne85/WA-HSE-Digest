@@ -46,7 +46,9 @@ export function ActionRow({ a, people, showSource }: { a: Action; people: Direct
 }
 
 /** Actions raised on a record (incident, audit, field leadership) or an investigation. */
-export function ActionsPanel({ submissionId, investigationId, canRaise }: { submissionId?: string; investigationId?: string; canRaise: boolean }) {
+export function ActionsPanel({ submissionId, investigationId, projectId, canRaise, title = 'Actions', emptyText }: {
+  submissionId?: string; investigationId?: string; projectId: string | null; canRaise: boolean; title?: string; emptyText?: string;
+}) {
   const [raising, setRaising] = useState(false);
   const { data, reload } = useAsync(async () => {
     const [actions, people] = await Promise.all([api.listActions({ submissionId, investigationId }), api.listDirectory()]);
@@ -55,22 +57,22 @@ export function ActionsPanel({ submissionId, investigationId, canRaise }: { subm
   useEffect(() => api.subscribeChanges(() => { void reload(); }), [reload]);
   const open = data?.actions.filter((a) => a.status === 'open').length ?? 0;
   return (
-    <Card title={<span className="flex items-center gap-2"><ListChecks className="h-5 w-5" />Actions{data ? ` (${open} open)` : ''}</span>} padded={false}
+    <Card title={<span className="flex items-center gap-2"><ListChecks className="h-5 w-5" />{title}{data ? ` (${open} open)` : ''}</span>} padded={false}
       actions={canRaise ? <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setRaising(true)}>Raise action</Button> : undefined}>
       <ul className="divide-y divide-steel-100">
         {data?.actions.map((a) => <ActionRow key={a.id} a={a} people={data.people} />)}
-        {data && !data.actions.length && <li className="px-4 py-5 text-sm text-steel-500">No actions raised yet.{canRaise ? ' Raise one to assign a fix to someone with a due date.' : ''}</li>}
+        {data && !data.actions.length && <li className="px-4 py-5 text-sm text-steel-500">{emptyText ?? `No actions raised yet.${canRaise ? ' Raise one to assign a fix to someone with a due date.' : ''}`}</li>}
       </ul>
       {raising && data && (
-        <RaiseActionModal submissionId={submissionId} investigationId={investigationId} people={data.people}
+        <RaiseActionModal submissionId={submissionId} investigationId={investigationId} projectId={projectId}
           onClose={() => setRaising(false)} onSaved={() => { setRaising(false); void reload(); }} />
       )}
     </Card>
   );
 }
 
-export function RaiseActionModal({ submissionId, investigationId, people, onClose, onSaved }: {
-  submissionId?: string; investigationId?: string; people: DirectoryEntry[]; onClose: () => void; onSaved: (a: Action) => void;
+export function RaiseActionModal({ submissionId, investigationId, projectId, onClose, onSaved }: {
+  submissionId?: string; investigationId?: string; projectId: string | null; onClose: () => void; onSaved: (a: Action) => void;
 }) {
   const { profile } = useAuth();
   const toast = useToast();
@@ -80,7 +82,8 @@ export function RaiseActionModal({ submissionId, investigationId, people, onClos
   const [due, setDue] = useState(addDays(perthToday(), 7));
   const [priority, setPriority] = useState<ActionPriority>('medium');
   const [busy, setBusy] = useState(false);
-  const sorted = [...people].sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const { data: people } = useAsync(() => api.listAssignable(projectId), [projectId]);
+  const sorted = people ?? [];
   const save = async () => {
     if (!title.trim()) { toast('Say what needs to be done', 'error'); return; }
     if (!assignee) { toast('Choose who the action is assigned to', 'error'); return; }

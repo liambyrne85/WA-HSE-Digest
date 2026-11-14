@@ -12,7 +12,7 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v6';
+const DB_KEY = 'fieldops-demo-db-v7';
 const SESSION_KEY = 'fieldops-demo-session';
 
 // A tiny signature image for the seeded inspections.
@@ -424,7 +424,10 @@ export function createDemoApi(): Api {
     };
     inv(fai, 'u-sup', addDays(fai.record_date!, 14), 'open');
     inv(lti, 'u-pm', addDays(lti.record_date!, 14), 'in_progress', { findings: 'Bottom lift step-off height was 600 mm with no intermediate step.' });
-    inv(older, 'u-hset', addDays(older.record_date!, 14), 'closed', { findings: 'Ladder not tied off.', corrective_actions: 'Ladder ties checked at every handover inspection.' });
+    inv(older, 'u-hset', addDays(older.record_date!, 14), 'closed', { findings: 'Ladder not tied off.', root_cause: 'Tie-off not on the handover checklist.',
+      corrective_actions: 'Ladder ties checked at every handover inspection.', no_actions_reason: 'Checklist updated on the day by HSET.',
+      submitted_for_review_by: 'u-hset', submitted_for_review_at: nowIso(), actions_confirmed: true, review_comment: 'Checklist change covers the root cause.',
+      reviewed_by: 'u-admin', reviewed_at: nowIso() });
 
     // Field leadership this week and last.
     const fl = (who: string, proj: string, n: number, type: string, obs: string) =>
@@ -561,10 +564,18 @@ export function createDemoApi(): Api {
     db.notifications.unshift({ id: uuid(), user_id: userId, title, body, link, read_at: null, created_at: nowIso() });
   };
   const fmt = (d: string) => d.split('-').reverse().join('/');
+  /** anyone on the record's project, Admin/HSET, or people you can already see */
+  const canAssign = (pid: string, projectId: string | null) => {
+    const p = db.profiles.find((x) => x.id === pid && x.is_active);
+    if (!p) return false;
+    return isLeader() || canSeePerson(pid) || ['admin', 'hset'].includes(p.role)
+      || (!!projectId && db.members.some((mb) => mb.profile_id === pid && mb.project_id === projectId && openOn(mb)));
+  };
   const createAction = (input: ActionInput, raisedBy: string): Action => {
     const rec = input.submission_id ? db.records.find((x) => x.id === input.submission_id) : undefined;
     const inv = !rec && input.investigation_id ? db.investigations.find((x) => x.id === input.investigation_id) : undefined;
     if (!rec && !inv) throw new Error('Record not found');
+    if (inv?.status === 'closed') throw new Error('This investigation is closed');
     if (!input.title?.trim()) throw new Error('Give the action a title');
     if (!input.due_date) throw new Error('Set a due date');
     if (!db.profiles.some((p) => p.id === input.assignee_id && p.is_active)) throw new Error('Assign the action to an active person');
@@ -1120,11 +1131,44 @@ export function createDemoApi(): Api {
         const ex = db.investigations.find((x) => x.id === i.id);
         const inc = ex && db.records.find((r) => r.id === ex.incident_id);
         if (!ex || !(isLeader() || ex.lead_id === m.id || (isProjectLead() && !!inc && canSee(inc)))) throw new Error('Permission denied');
-        const next = { ...ex, ...i, incident_id: ex.incident_id, reference: ex.reference, project_id: ex.project_id };
-        if (next.status === 'closed' && ex.status !== 'closed') next.closed_at = nowIso();
-        if (next.status !== 'closed') next.closed_at = null;
+        const next: Investigation = { ...ex, ...i, incident_id: ex.incident_id, reference: ex.reference, project_id: ex.project_id };
+        const reviewer = isLeader() || (isProjectLead() && !!inc && canSee(inc));
+        const link = `/investigations/${ex.id}`;
+        if (next.status !== ex.status) {
+          if (next.status === 'review') {
+            if (!['open', 'in_progress'].includes(ex.status)) throw new Error('Only an open investigation can be submitted for review');
+            if (!next.findings?.trim() || !next.root_cause?.trim()) throw new Error('Record the findings and root cause before submitting for review');
+            const live = (db.actions ?? []).filter((a) => a.investigation_id === ex.id && a.status !== 'cancelled').length;
+            if (!live && !next.no_actions_reason?.trim()) throw new Error('Raise the actions that address the gaps found (or say why no actions are needed)');
+            Object.assign(next, { submitted_for_review_at: nowIso(), submitted_for_review_by: m.id, actions_confirmed: false, reviewed_by: null, reviewed_at: null });
+          } else if (next.status === 'closed') {
+            if (ex.status !== 'review') throw new Error('Submit the investigation for review before closing it');
+            if (!reviewer) throw new Error('Only Admin, HSET or a project lead can review and close an investigation');
+            if (ex.lead_id === m.id) throw new Error('The review must be done by someone other than the investigation lead');
+            if (!next.actions_confirmed) throw new Error('Confirm the actions address the gaps and root causes found');
+            if (!next.review_comment?.trim()) throw new Error('Add a review comment');
+            Object.assign(next, { reviewed_by: m.id, reviewed_at: nowIso() });
+          } else if (ex.status === 'review') {
+            if (!reviewer) throw new Error('Only Admin, HSET or a project lead can send an investigation back');
+            if (!next.review_comment?.trim() || next.review_comment === ex.review_comment) throw new Error('Say what needs more work');
+            next.actions_confirmed = false;
+          } else if (ex.status === 'closed') {
+            if (!isLeader()) throw new Error('Only Admin or HSET can reopen a closed investigation');
+            Object.assign(next, { actions_confirmed: false, reviewed_by: null, reviewed_at: null });
+          }
+        }
+        next.closed_at = next.status === 'closed' ? (ex.status === 'closed' ? ex.closed_at : nowIso()) : null;
         audit('investigations', ex.id, 'update', { ...ex }, next);
+        const before = { ...ex };
         Object.assign(ex, next);
+        if (ex.status !== before.status) {
+          if (ex.status === 'review') {
+            db.profiles.filter((p) => p.is_active && p.id !== ex.lead_id && (['admin', 'hset'].includes(p.role)
+              || (p.role === 'project_manager' && db.members.some((mb) => mb.profile_id === p.id && mb.project_id === ex.project_id && !mb.end_date))))
+              .forEach((p) => notifyAction(p.id, `Investigation ready for review: ${ex.reference}`, `${ex.reference} has findings and actions ready for review.`, link));
+          } else if (before.status === 'review' && ex.status !== 'closed') notifyAction(ex.lead_id, `Investigation sent back: ${ex.reference}`, ex.review_comment ?? '', link);
+          else if (ex.status === 'closed') notifyAction(ex.lead_id, `Investigation closed: ${ex.reference}`, ex.review_comment ?? '', link);
+        }
         commit();
         return delay(ex);
       }
@@ -1171,13 +1215,22 @@ export function createDemoApi(): Api {
       const a = (db.actions ?? []).find((x) => x.id === id);
       return delay(a && canSeeAction(a) ? a : null);
     },
+    async listAssignable(projectId) {
+      if (!me()) return delay([]);
+      return delay(db.profiles.filter((p) => p.is_active && canAssign(p.id, projectId))
+        .map((p) => ({ id: p.id, full_name: p.full_name, role: p.role, organization_id: p.organization_id }))
+        .sort((a, b) => a.full_name.localeCompare(b.full_name)));
+    },
     async raiseAction(input) {
       const m = requireMe();
+      const already = input.id ? (db.actions ?? []).find((x) => x.id === input.id) : undefined;
+      if (already) return delay(already);
       const rec = input.submission_id ? db.records.find((x) => x.id === input.submission_id) : undefined;
       const inv = input.investigation_id ? db.investigations.find((x) => x.id === input.investigation_id) : undefined;
       const allowed = isLeader() || (!!rec && canSee(rec)) || (!!inv && (inv.lead_id === m.id || (() => { const inc = db.records.find((x) => x.id === inv.incident_id); return !!inc && canSee(inc); })()));
       if (!allowed) throw new Error('You can only raise actions on records you can see');
-      if (!isLeader() && !canSeePerson(input.assignee_id)) throw new Error('You can only assign actions to people you can see');
+      const proj = rec?.project_id ?? inv?.project_id ?? null;
+      if (!canAssign(input.assignee_id, proj)) throw new Error('You can only assign actions to people on this project, Admin or HSET');
       const a = createAction(input, m.id);
       commit();
       return delay(a);
@@ -1197,7 +1250,7 @@ export function createDemoApi(): Api {
       }
       if (editing) {
         if (next.status !== 'open') throw new Error('Reopen the action before changing it');
-        if (patch.assignee_id && patch.assignee_id !== a.assignee_id && !isLeader() && !canSeePerson(patch.assignee_id)) throw new Error('You can only assign actions to people you can see');
+        if (patch.assignee_id && patch.assignee_id !== a.assignee_id && !canAssign(patch.assignee_id, a.project_id)) throw new Error('You can only assign actions to people on this project, Admin or HSET');
         for (const k of ['title', 'description', 'priority', 'assignee_id', 'due_date'] as const) if (patch[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = patch[k];
       }
       next.updated_at = nowIso();

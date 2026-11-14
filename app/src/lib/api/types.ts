@@ -186,6 +186,8 @@ export interface Api {
   // actions
   listActions(filter?: { submissionId?: string; investigationId?: string }): Promise<Action[]>;
   getAction(id: string): Promise<Action | null>;
+  /** people an action on this project can be assigned to (project members, Admin/HSET) */
+  listAssignable(projectId: string | null): Promise<DirectoryEntry[]>;
   raiseAction(input: ActionInput): Promise<Action>;
   /** raiser / Admin / HSET / project lead: edit, reassign, reopen or cancel (status_note = reason) */
   updateAction(id: string, patch: Partial<ActionInput> & { status?: ActionStatus; status_note?: string }): Promise<Action>;

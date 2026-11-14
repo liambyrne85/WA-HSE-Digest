@@ -336,7 +336,7 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       return unwrap(await sb.from('investigations').select('*').is('archived_at', null).order('opened_at', { ascending: false })) as Investigation[];
     },
     async saveInvestigation(i) {
-      const { id, created_at: _c, reference: _r, opened_at: _o, closed_at: _x, ...row } = i;
+      const { id, created_at: _c, reference: _r, opened_at: _o, closed_at: _x, submitted_for_review_at: _s, submitted_for_review_by: _sb, reviewed_by: _rb, reviewed_at: _ra, ...row } = i;
       const q = id ? sb.from('investigations').update(row).eq('id', id) : sb.from('investigations').insert(row);
       return unwrap(await q.select().single()) as Investigation;
     },
@@ -425,7 +425,14 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     async getAction(id) {
       return unwrap(await sb.from('actions').select('*').eq('id', id).maybeSingle()) as Action | null;
     },
+    async listAssignable(projectId) {
+      return unwrap(await sb.rpc('assignable_people', { p_project: projectId })) as DirectoryEntry[];
+    },
     async raiseAction(input) {
+      if (input.id) {
+        const existing = unwrap(await sb.from('actions').select('*').eq('id', input.id).maybeSingle()) as Action | null;
+        if (existing) return existing; // an earlier (offline) attempt already got through
+      }
       const { id, submission_id, investigation_id, title, description, priority, assignee_id, due_date } = input;
       return unwrap(await sb.from('actions').insert({ id: id ?? newId(), submission_id: submission_id ?? null, investigation_id: investigation_id ?? null,
         title, description, priority, assignee_id, due_date }).select().single()) as Action;
@@ -532,8 +539,8 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       return unwrap(await sb.from('app_settings').select('*').eq('id', 1).single()) as AppSettings;
     },
     async saveSettings(patch) {
-      const { company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence } = patch;
-      const clean = Object.fromEntries(Object.entries({ company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence }).filter(([, v]) => v !== undefined));
+      const { company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence, email_from, app_url } = patch;
+      const clean = Object.fromEntries(Object.entries({ company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence, email_from, app_url }).filter(([, v]) => v !== undefined));
       return unwrap(await sb.from('app_settings').update({ ...clean, updated_by: await uid() }).eq('id', 1).select().single()) as AppSettings;
     },
     async uploadLogo(file) {

@@ -4,18 +4,18 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { RecordInput } from '../api/types';
-import type { ActionCloseInput, ScaffoldInspectionInput } from '../types';
+import type { ActionCloseInput, ActionInput, ScaffoldInspectionInput } from '../types';
 import { kvGet, kvSet } from './kv';
 import { isNetworkError, isOnline } from './net';
 
-export type OutboxKind = 'scaffold_inspection' | 'record' | 'action_close';
+export type OutboxKind = 'scaffold_inspection' | 'record' | 'action_close' | 'action_raise';
 export interface OutboxItem {
   id: string;
   kind: OutboxKind;
   /** shown in the sync list, e.g. "Inspection · SCF-PHW-0001" */
   label: string;
   user_id: string;
-  payload: ScaffoldInspectionInput | RecordInput | ActionCloseInput;
+  payload: ScaffoldInspectionInput | RecordInput | ActionCloseInput | ActionInput;
   /** link to open once synced, e.g. /scaffolds/{id} */
   link?: string;
   scaffold_id?: string;
@@ -43,13 +43,14 @@ export async function removeOutboxItem(id: string) {
 async function send(item: OutboxItem) {
   if (item.kind === 'scaffold_inspection') return api.submitScaffoldInspection(item.payload as ScaffoldInspectionInput);
   if (item.kind === 'action_close') return api.closeAction(item.payload as ActionCloseInput);
+  if (item.kind === 'action_raise') return api.raiseAction(item.payload as ActionInput);
   return api.saveRecord(item.payload as RecordInput);
 }
 
 /** Send now if there's coverage; otherwise (or if the connection drops) keep it on the phone. */
-export async function submitOrQueue<T>(item: Omit<OutboxItem, 'created_at' | 'attempts' | 'user_id'>): Promise<{ queued: boolean; result?: T }> {
+export async function submitOrQueue<T>(item: Omit<OutboxItem, 'created_at' | 'attempts' | 'user_id'>, opts: { queueOnly?: boolean } = {}): Promise<{ queued: boolean; result?: T }> {
   const session = await api.getSession();
-  if (isOnline()) {
+  if (isOnline() && !opts.queueOnly) {
     try {
       return { queued: false, result: (await send({ ...item, user_id: session?.userId ?? '', created_at: '', attempts: 0 })) as T };
     } catch (e) {

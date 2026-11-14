@@ -68,17 +68,53 @@ update public.actions set status = 'cancelled', status_note = 'Covered at Monday
 select tests.assert_count($$select 1 from public.actions where status = 'cancelled'$$, 1, 'raiser cancels with a reason');
 select tests.assert_fails($$delete from public.actions$$, 'actions cannot be deleted');
 
--- Actions on an investigation
+-- Actions on an investigation (raised at the end of the investigation, then reviewed)
+reset role;
+select tests.login('11111111-1111-1111-1111-111111111111');
+set role authenticated;
+select tests.assert_fails($$insert into public.actions (investigation_id, title, assignee_id, due_date) select inv, 'x', '13131313-1313-1313-1313-131313131313', current_date from src$$,
+  'no new actions on a closed investigation');
+update public.investigations set status = 'in_progress', no_actions_reason = null;
+select tests.login('13131313-1313-1313-1313-131313131313');
+select tests.assert_fails($$update public.investigations set status = 'review'$$, 'review needs actions (or a reason there are none)');
 with x as (
   insert into public.actions (investigation_id, title, assignee_id, due_date)
   select inv, 'Add intermediate step to bottom lift', '13131313-1313-1313-1313-131313131313', current_date + 14 from src returning id)
 insert into act select 'c', id from x;
 select tests.assert_count($$select 1 from public.actions where source_module = 'investigation' and source_reference like 'INV-%'$$, 1, 'action raised from an investigation');
+update public.investigations set status = 'review';
+select tests.assert_count($$select 1 from public.investigations where status = 'review' and submitted_for_review_by = '13131313-1313-1313-1313-131313131313'$$, 1, 'lead submits for review once actions are raised');
+select tests.assert_fails($$update public.investigations set status = 'closed', actions_confirmed = true, review_comment = 'ok'$$, 'the lead cannot review their own investigation');
+select tests.login('12121212-1212-1212-1212-121212121212');
+select tests.assert_fails($$update public.investigations set status = 'closed', review_comment = 'ok'$$, 'reviewer must confirm the actions address the gaps');
+update public.investigations set status = 'in_progress', review_comment = 'Root cause needs the 5 whys';
+reset role;
+select tests.assert_count($$select 1 from public.notifications where user_id = '13131313-1313-1313-1313-131313131313' and title like 'Investigation sent back:%'$$, 1, 'HSET sends it back; the lead is told why');
+set role authenticated;
+select tests.login('13131313-1313-1313-1313-131313131313');
+update public.investigations set root_cause = 'No intermediate step; design standard not checked', status = 'review';
+select tests.login('12121212-1212-1212-1212-121212121212');
+update public.investigations set status = 'closed', actions_confirmed = true, review_comment = 'Action addresses the root cause';
+select tests.assert_count($$select 1 from public.investigations where status = 'closed' and reviewed_by = '12121212-1212-1212-1212-121212121212' and actions_confirmed$$, 1, 'HSET reviews and closes');
+select tests.login('13131313-1313-1313-1313-131313131313');
 
 -- Subcontractor supervisor can't assign to people they can't see
 select tests.login('33333333-3333-3333-3333-333333333333');
-select tests.assert_fails($$insert into public.actions (submission_id, title, assignee_id, due_date)
-  select id, 'x', '22222222-2222-2222-2222-222222222222', current_date from public.form_submissions limit 1$$,
-  'subcontractor supervisor cannot assign our people');
+-- Anyone raising an action can assign it to people on the record's project, Admin or HSET
+select tests.login('22222222-2222-2222-2222-222222222222');
+with x as (
+  insert into public.actions (submission_id, title, assignee_id, due_date)
+  select incident, 'Replace missing barricade', '13131313-1313-1313-1313-131313131313', current_date + 2 from src returning id)
+insert into act select 'w', id from x;
+select tests.assert_count($$select 1 from public.actions where title = 'Replace missing barricade'$$, 1, 'a worker raises an action on their record and assigns it to the PM on the project');
 reset role;
-select tests.assert_count($$select 1 from public.audit_log where table_name = 'actions'$$, 6, 'every change is in the history');
+select tests.login('11111111-1111-1111-1111-111111111111');
+insert into auth.users (id, email) values ('66666666-6666-6666-6666-666666666666', 'elsewhere@internal.test');
+update public.profiles set is_active = true where id = '66666666-6666-6666-6666-666666666666';
+set role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222');
+select tests.assert_fails($$insert into public.actions (submission_id, title, assignee_id, due_date)
+  select incident, 'x', '66666666-6666-6666-6666-666666666666', current_date from src$$,
+  'cannot assign to someone who is not on the project');
+reset role;
+select tests.assert_count($$select 1 from public.audit_log where table_name = 'actions'$$, 7, 'every change is in the history');

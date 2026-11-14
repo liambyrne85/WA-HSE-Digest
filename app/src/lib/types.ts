@@ -352,6 +352,16 @@ export interface Investigation {
   findings: string | null;
   root_cause: string | null;
   corrective_actions: string | null;
+  /** required to submit for review when no actions are raised */
+  no_actions_reason?: string | null;
+  submitted_for_review_at?: string | null;
+  submitted_for_review_by?: string | null;
+  /** reviewer's comment (also the reason when sent back) */
+  review_comment?: string | null;
+  /** reviewer confirms the actions address the gaps and root causes found */
+  actions_confirmed?: boolean;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
   opened_at: string;
   closed_at: string | null;
   created_at: string;
@@ -402,6 +412,10 @@ export interface AppSettings {
   accent_color: string;
   dark_color: string;
   logo_url: string | null;
+  /** sender address for emails (on a domain verified with the email service) */
+  email_from?: string | null;
+  /** web address of the app, used for links in emails */
+  app_url?: string | null;
   /** minimum scaffolding licence class to sign off an inspection */
   scaffold_min_licence?: LicenceClass;
 }
