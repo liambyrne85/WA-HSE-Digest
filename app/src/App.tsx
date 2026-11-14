@@ -20,6 +20,8 @@ import TemplatesPage from './pages/admin/TemplatesPage';
 import PeoplePage from './pages/admin/PeoplePage';
 import PersonPage from './pages/PersonPage';
 import WorkflowPage from './pages/admin/WorkflowPage';
+import VehiclesPage from './pages/VehiclesPage';
+import InvestigationsPage, { InvestigationDetailPage } from './pages/InvestigationsPage';
 
 /** UI-level guard. Real enforcement is Postgres RLS; this just keeps users out of screens they can't use. */
 function RequireRole({ roles, children }: { roles: AppRole[]; children: JSX.Element }) {
@@ -63,6 +65,10 @@ export default function App() {
         <Route path="/timesheets" element={<ModulePage key="timesheet" module="timesheet" />} />
         <Route path="/prestart" element={<ModulePage key="plant_prestart" module="plant_prestart" />} />
         <Route path="/risk" element={<ModulePage key="risk_assessment" module="risk_assessment" />} />
+        <Route path="/leadership" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><ModulePage key="field_leadership" module="field_leadership" /></RequireRole>} />
+        <Route path="/vehicles" element={<VehiclesPage />} />
+        <Route path="/investigations" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><InvestigationsPage /></RequireRole>} />
+        <Route path="/investigations/:id" element={<InvestigationDetailPage />} />
         <Route path="/audits" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><ModulePage key="audit" module="audit" /></RequireRole>} />
         <Route path="/records/new" element={<RecordFormPage />} />
         <Route path="/records/:id" element={<RecordDetailPage />} />

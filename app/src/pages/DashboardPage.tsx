@@ -1,14 +1,12 @@
 import { clsx } from 'clsx';
-import {
-  AlertTriangle, ArrowRight, CheckSquare, ClipboardList, FileText, GraduationCap, HardHat, LayoutTemplate,
-  MapPin, ShieldAlert, Truck, Users, Workflow,
-} from 'lucide-react';
+import { AlertTriangle, ArrowRight, ClipboardList, GraduationCap, MapPin, Truck } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SafetyDashboard } from '../components/dashboard/SafetyDashboard';
 import { quickActionsFor } from '../components/layout/quickActions';
 import { Badge, Card, StatCard } from '../components/ui';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
-import { PROJECT_STATUS, daysUntil, formatDate, ticketState } from '../lib/labels';
+import { PROJECT_STATUS, addDays, daysUntil, perthToday, formatDate, ticketState } from '../lib/labels';
 import { useAsync } from '../lib/useAsync';
 import { StatusBadge } from './ModulePage';
 
@@ -22,19 +20,17 @@ export default function DashboardPage() {
   const isLead = isProjectLead;
 
   const { data } = useAsync(async () => {
-    const [projects, tickets, profiles, templates, rules, invitations, orgs, records, approvals, pipelines] = await Promise.all([
+    const [projects, tickets, profiles, orgs, records, approvals, pipelines] = await Promise.all([
       api.listProjects(),
       api.listTickets(),
       api.listProfiles(),
-      api.listTemplates(),
-      api.listRules(),
-      api.listInvitations(),
       api.listOrganizations(),
-      api.listRecords(),
+      // Workers only need their own recent records here; leaders use the safety dashboard.
+      isWorker ? api.listRecords(undefined, { from: addDays(perthToday(), -60) }) : Promise.resolve([]),
       api.listMyPendingApprovals(),
       api.listPipelines(),
     ]);
-    return { projects, tickets, profiles, templates, rules, invitations, orgs, records, approvals, pipelines };
+    return { projects, tickets, profiles, orgs, records, approvals, pipelines };
   }, []);
 
   const activeProjects = data?.projects.filter((p) => p.is_active && p.status === 'active') ?? [];
@@ -46,9 +42,6 @@ export default function DashboardPage() {
   const nameOf = (id: string) => data?.profiles.find((p) => p.id === id)?.full_name ?? 'You';
   const terminal = (m: string, st: string) => !!data?.pipelines.find((p) => p.module === m)?.statuses.find((s) => s.key === st)?.is_terminal;
   const records = data?.records ?? [];
-  const open = (m?: string) => records.filter((r) => (!m || r.module === m) && r.status !== 'draft' && !terminal(r.module, r.status));
-  const today = new Date().toDateString();
-  const weekAgo = Date.now() - 7 * 864e5;
   const mine = records.filter((r) => r.submitted_by === profile?.id);
   const statusesFor = (m: string) => data?.pipelines.find((p) => p.module === m)?.statuses;
 
@@ -90,40 +83,21 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {(isLeader || isLead) && <SafetyDashboard />}
+
       {/* Summary cards */}
-      <section aria-labelledby="summary" className="mb-7">
+      {isWorker && <section aria-labelledby="summary" className="mb-7">
         <h2 id="summary" className="mb-3 text-xl font-bold uppercase text-steel-800">At a glance</h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {isLeader && <>
-            <StatCard label="Open safety events" value={data ? open('safety_event').length : '–'} tone="red" icon={<ShieldAlert className="h-5 w-5" />}
-              hint={`${open('safety_event').filter((r) => /high|critical/i.test(String(r.summary?.severity ?? ''))).length} high / critical`} />
-            <StatCard label="Waiting for approval" value={data?.approvals.length ?? '–'} tone="amber" icon={<CheckSquare className="h-5 w-5" />}
-              hint={`${data?.approvals.filter((a) => a.due_at && new Date(a.due_at).getTime() < Date.now()).length ?? 0} overdue`} />
-            <StatCard label="Active projects" value={activeProjects.length} tone="green" icon={<MapPin className="h-5 w-5" />} hint={`${data?.projects.length ?? 0} in register`} />
-            <StatCard label="Tickets expiring ≤30d" value={expiring.length} tone={expiring.length ? 'amber' : 'green'} icon={<GraduationCap className="h-5 w-5" />} hint="Across all workers" />
-            <StatCard label="Active users" value={data?.profiles.filter((p) => p.is_active).length ?? '–'} tone="blue" icon={<Users className="h-5 w-5" />}
-              hint={`${data?.invitations.filter((i) => i.status === 'pending').length ?? 0} invitations pending`} />
-            <StatCard label="Contractor companies" value={data?.orgs.filter((o) => o.type === 'contractor' && o.is_active).length ?? '–'} tone="orange" icon={<HardHat className="h-5 w-5" />} />
-            <StatCard label="Published templates" value={data?.templates.filter((t) => t.status === 'published').length ?? '–'} tone="purple" icon={<LayoutTemplate className="h-5 w-5" />}
-              hint={`${data?.templates.filter((t) => t.has_unpublished_changes).length ?? 0} with unpublished changes`} />
-            <StatCard label="Active workflow rules" value={data?.rules.filter((r) => r.is_enabled).length ?? '–'} tone="slate" icon={<Workflow className="h-5 w-5" />} hint={`${data?.rules.length ?? 0} configured`} />
-          </>}
           {isWorker && <>
             <StatCard label="My open records" value={data ? mine.filter((r) => r.status !== 'draft' && !terminal(r.module, r.status)).length : '–'} tone="amber" icon={<ClipboardList className="h-5 w-5" />}
               hint={`${mine.filter((r) => r.status === 'draft').length} drafts · ${mine.filter((r) => ['rejected', 'returned'].includes(r.status)).length} returned`} />
-            <StatCard label="My pre-starts today" value={data ? mine.filter((r) => r.module === 'plant_prestart' && new Date(r.created_at).toDateString() === today).length : '–'} tone="orange" icon={<Truck className="h-5 w-5" />} />
+            <StatCard label="My pre-starts today" value={data ? mine.filter((r) => r.module === 'plant_prestart' && r.record_date === perthToday()).length : '–'} tone="orange" icon={<Truck className="h-5 w-5" />} />
             <StatCard label="My tickets" value={myTickets.length} tone="green" icon={<GraduationCap className="h-5 w-5" />} hint={expiring.length ? `${expiring.length} expiring soon` : 'All current'} />
             <StatCard label="Active projects" value={activeProjects.length} tone="blue" icon={<MapPin className="h-5 w-5" />} />
           </>}
-          {isLead && <>
-            <StatCard label="Crew members" value={data?.profiles.filter((p) => p.is_active).length ?? '–'} tone="blue" icon={<Users className="h-5 w-5" />} hint={myOrg?.name} />
-            <StatCard label="Crew tickets expiring" value={expiring.length} tone={expiring.length ? 'red' : 'green'} icon={<GraduationCap className="h-5 w-5" />} hint="Expired or ≤30 days" />
-            <StatCard label="DFRs this week" value={data ? records.filter((r) => r.module === 'daily_field_report' && r.status !== 'draft' && new Date(r.created_at).getTime() > weekAgo).length : '–'} tone="orange" icon={<FileText className="h-5 w-5" />}
-              hint={`${records.filter((r) => ['rejected', 'returned'].includes(r.status)).length} returned for changes`} />
-            <StatCard label="Assigned projects" value={activeProjects.length} tone="green" icon={<MapPin className="h-5 w-5" />} />
-          </>}
         </div>
-      </section>
+      </section>}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title={isLeader ? 'Active projects' : 'Your projects'} padded={false}
@@ -189,10 +163,10 @@ export default function DashboardPage() {
       </Card>
 
       {isLeader && data && data.profiles.some((p) => !p.is_active) && (
-        <Link to="/admin/users" className="mt-5 flex items-center gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+        <Link to="/people" className="mt-5 flex items-center gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
           <AlertTriangle className="h-5 w-5 shrink-0" />
           <span className="flex-1 text-sm font-semibold">
-            {data.profiles.filter((p) => !p.is_active).length} account(s) awaiting activation — review in Users & Contractors.
+            {data.profiles.filter((p) => !p.is_active).length} account(s) awaiting activation — review in People.
           </span>
           <ArrowRight className="h-5 w-5" />
         </Link>

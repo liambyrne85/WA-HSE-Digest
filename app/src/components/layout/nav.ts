@@ -1,5 +1,5 @@
 import {
-  CheckSquare, ClipboardCheck, Clock, FileText, GraduationCap, Home, LayoutTemplate, MapPin, Palette,
+  Car, CheckSquare, ClipboardCheck, Clock, FileText, GraduationCap, Home, LayoutTemplate, MapPin, Palette, Search, Target,
   ShieldAlert, ShieldCheck, Truck, User, Users, Workflow, type LucideIcon,
 } from 'lucide-react';
 import type { AppRole } from '../../lib/types';
@@ -26,7 +26,10 @@ export const NAV: NavItem[] = [
   { to: '/safety', label: 'Safety Events', icon: ShieldAlert, roles: ALL, section: 'modules' },
   { to: '/dfr', label: 'Daily Field Reports', icon: FileText, roles: ALL, section: 'modules' },
   { to: '/timesheets', label: 'Timesheets', icon: Clock, roles: ALL, section: 'modules' },
-  { to: '/prestart', label: 'Plant Pre-Starts', icon: Truck, roles: ALL, section: 'modules' },
+  { to: '/prestart', label: 'Pre-Starts', icon: Truck, roles: ALL, section: 'modules' },
+  { to: '/vehicles', label: 'Vehicles & Plant', icon: Car, roles: ALL, section: 'modules' },
+  { to: '/investigations', label: 'Investigations', icon: Search, roles: LEADS, section: 'modules' },
+  { to: '/leadership', label: 'Field Leadership', icon: Target, roles: LEADS, section: 'modules' },
   { to: '/risk', label: 'Risk Assessments', icon: ShieldCheck, roles: ALL, section: 'modules' },
   { to: '/audits', label: 'Audits & Inspections', icon: ClipboardCheck, roles: LEADS, section: 'modules' },
   {

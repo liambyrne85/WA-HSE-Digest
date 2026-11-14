@@ -417,16 +417,19 @@ alter table public.vehicles enable row level security;
 alter table public.investigations enable row level security;
 alter table public.leadership_targets enable row level security;
 
--- Vehicles: everyone sees the vehicles on projects they can see (to pick one for a
--- pre-start); Admin/HSET manage the register; PMs/Supervisors can update vehicles
--- on their projects (e.g. return to service).
+-- Vehicles: everyone on the project sees the fleet there; subcontractors only see vehicles
+-- their own people operate (they can't see our pre-starts, so our fleet is not theirs to track).
 create policy vehicles_select on public.vehicles for select to authenticated
-  using (public.is_leader() or operator_id = auth.uid() or (project_id is not null and public.can_access_project(project_id)));
+  using (public.is_leader() or operator_id = auth.uid()
+         or (project_id is not null and public.can_access_project(project_id)
+             and (public.is_internal_user() or (operator_id is not null and public.can_see_person(operator_id)))));
 create policy vehicles_insert on public.vehicles for insert to authenticated
   with check (public.is_leader());
 create policy vehicles_update on public.vehicles for update to authenticated
-  using (public.is_leader() or (public.is_project_lead() and project_id in (select public.my_project_ids())))
-  with check (public.is_leader() or (public.is_project_lead() and project_id in (select public.my_project_ids())));
+  using (public.is_leader() or (public.is_project_lead() and project_id in (select public.my_project_ids())
+         and (public.is_internal_user() or (operator_id is not null and public.can_see_person(operator_id)))))
+  with check (public.is_leader() or (public.is_project_lead() and project_id in (select public.my_project_ids())
+         and (public.is_internal_user() or (operator_id is not null and public.can_see_person(operator_id)))));
 
 -- Investigations: visible with the incident; Admin/HSET or a lead on the
 -- project opens them; the investigation lead can update.
@@ -488,8 +491,22 @@ revoke execute on function public.investigation_after_insert() from public, anon
 
 -- Live dashboard: stream changes on these tables to signed-in clients (RLS applies).
 do $$
+declare t text;
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    alter publication supabase_realtime add table public.form_submissions, public.vehicles, public.investigations, public.leadership_targets;
+    for t in select unnest(array['form_submissions', 'vehicles', 'investigations', 'leadership_targets']) loop
+      if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      end if;
+    end loop;
   end if;
 end $$;
+
+-- History: anyone who can see a vehicle or investigation can read its change history
+-- (the sub-selects run under the caller's row-level security).
+alter policy audit_log_select on public.audit_log
+  using (public.is_leader()
+         or (table_name = 'profiles' and record_id = auth.uid()::text)
+         or (table_name = 'form_submissions' and public.can_see_submission(record_id::uuid))
+         or (table_name = 'vehicles' and exists (select 1 from public.vehicles v where v.id::text = audit_log.record_id))
+         or (table_name = 'investigations' and exists (select 1 from public.investigations i where i.id::text = audit_log.record_id)));

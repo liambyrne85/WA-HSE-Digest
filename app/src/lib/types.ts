@@ -5,12 +5,12 @@ export type OrgType = 'internal' | 'contractor';
 export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'completed' | 'closed';
 export type TemplateCategory =
   | 'audit' | 'plant_prestart' | 'risk_assessment' | 'safety_event'
-  | 'daily_field_report' | 'timesheet' | 'training';
+  | 'daily_field_report' | 'timesheet' | 'training' | 'field_leadership';
 export type TemplateStatus = 'draft' | 'published' | 'archived';
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
 export type WorkflowModule =
   | 'safety_event' | 'daily_field_report' | 'plant_prestart' | 'audit'
-  | 'risk_assessment' | 'timesheet' | 'training';
+  | 'risk_assessment' | 'timesheet' | 'training' | 'field_leadership';
 export type WorkflowTrigger =
   | 'record_created' | 'status_changed' | 'field_condition' | 'record_overdue' | 'ticket_expiring';
 
@@ -133,7 +133,7 @@ export interface LookupValue {
 
 // ---- Dynamic forms --------------------------------------------------------
 export type QuestionType =
-  | 'pass_fail_na' | 'yes_no' | 'text' | 'number' | 'dropdown' | 'photo' | 'signature' | 'table';
+  | 'pass_fail_na' | 'yes_no' | 'text' | 'number' | 'dropdown' | 'photo' | 'signature' | 'table' | 'date' | 'datetime';
 
 export interface TableColumn {
   id: string;
@@ -180,6 +180,8 @@ export interface TemplateSchema {
     requireSignOff?: boolean;
     /** status to use when a critical item fails on submit (e.g. defect_reported) */
     criticalFailStatus?: string;
+    /** pre-starts: the record must be linked to a vehicle from the register */
+    requireVehicle?: boolean;
   };
   sections: Section[];
 }
@@ -311,6 +313,52 @@ export interface RecordRow {
   created_at: string;
   updated_at: string;
   last_status_change_at: string;
+  /** the day the record is about (incident date, pre-start day …), YYYY-MM-DD */
+  record_date: string | null;
+  vehicle_id: string | null;
+  archived_at?: string | null;
+}
+
+export interface Vehicle {
+  id: string;
+  fleet_number: string;
+  rego: string | null;
+  vehicle_type: string | null;
+  project_id: string | null;
+  operator_id: string | null;
+  is_active: boolean;
+  daily_prestart_required: boolean;
+  status: 'in_service' | 'out_of_service';
+  out_of_service_reason: string | null;
+  out_of_service_at: string | null;
+  out_of_service_record_id: string | null;
+  notes: string | null;
+  archived_at: string | null;
+  created_at: string;
+}
+
+export type InvestigationStatus = 'open' | 'in_progress' | 'review' | 'closed';
+export interface Investigation {
+  id: string;
+  reference: string | null;
+  incident_id: string;
+  project_id: string | null;
+  organization_id: string | null;
+  lead_id: string | null;
+  status: InvestigationStatus;
+  due_date: string | null;
+  findings: string | null;
+  root_cause: string | null;
+  corrective_actions: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  created_at: string;
+}
+
+export interface LeadershipTarget {
+  profile_id: string;
+  period: 'week' | 'month';
+  target: number;
 }
 
 export interface RecordApproval {

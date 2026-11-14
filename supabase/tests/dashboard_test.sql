@@ -20,6 +20,11 @@ select tests.assert_count('select * from public.vehicles', 2, 'worker sees vehic
 select tests.assert_fails($$insert into public.vehicles (fleet_number) values ('ROGUE')$$, 'worker cannot add vehicles');
 select tests.login('13131313-1313-1313-1313-131313131313');
 select tests.assert_count('select * from public.vehicles', 2, 'PM sees vehicles on their projects');
+select tests.login('33333333-3333-3333-3333-333333333333');
+select tests.assert_count('select * from public.vehicles', 1, 'subcontractor supervisor sees only vehicles their own people operate');
+update public.vehicles set notes = 'x' where id = 'bbbbbbbb-0000-0000-0000-000000000001';
+select tests.login('13131313-1313-1313-1313-131313131313');
+select tests.assert_count($$select 1 from public.vehicles where notes = 'x'$$, 0, 'subcontractor supervisor cannot change our vehicles');
 
 -- Pre-start with a critical fail tags the vehicle out of service; record date = today (Perth)
 select tests.login('22222222-2222-2222-2222-222222222222');
@@ -72,6 +77,10 @@ select tests.login('13131313-1313-1313-1313-131313131313');
 update public.investigations set status = 'closed', findings = 'Done';
 select tests.assert_count($$select 1 from public.investigations where status = 'closed' and closed_at is not null and closed_by = '13131313-1313-1313-1313-131313131313'$$, 1, 'closing records who and when');
 select tests.assert_fails($$delete from public.investigations$$, 'investigations cannot be deleted');
+select tests.assert_count($$select 1 from public.audit_log where table_name = 'investigations'$$, 2, 'PM can read the investigation''s history');
+select tests.login('33333333-3333-3333-3333-333333333333');
+select tests.assert_count($$select 1 from public.audit_log where table_name = 'investigations'$$, 0, 'subcontractor supervisor cannot read its history');
+select tests.login('13131313-1313-1313-1313-131313131313');
 
 -- Field leadership + targets
 insert into public.form_submissions (template_version_id, project_id, status, answers)

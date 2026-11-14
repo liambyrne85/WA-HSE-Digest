@@ -21,6 +21,13 @@ select dfr, 'aaaaaaaa-0000-0000-0000-000000000001', 'submitted',
        '{"q-shift":"Day","q-crew":[{"name":"A","hours":"8"},{"name":"B","hours":"7.5"}],"q-work":"Bulk earthworks"}'
   from v;
 insert into ids select 'dfr1', id from public.form_submissions where submitted_by = auth.uid() order by created_at desc limit 1;
+-- Saving returns the new row (the app inserts with RETURNING): must pass the read policy.
+with x as (
+  insert into public.form_submissions (template_version_id, project_id, status, answers)
+  select dfr, 'aaaaaaaa-0000-0000-0000-000000000001', 'draft', '{"q-shift":"Night"}' from v
+  returning id)
+insert into ids select 'returning', id from x;
+select tests.assert_count($$select 1 from ids where k = 'returning'$$, 1, 'insert … returning works for a worker');
 select tests.assert_count($$select 1 from public.form_submissions s join ids on ids.id = s.id and ids.k = 'dfr1'
   where s.reference like 'DFR-%' and s.status = 'submitted' and s.module = 'daily_field_report' and (s.summary->>'total_hours')::numeric = 15.5$$,
   1, 'DFR gets a reference, submitted status and total hours');

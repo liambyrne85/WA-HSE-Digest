@@ -1,5 +1,5 @@
 import {
-  ArrowDown, ArrowLeft, ArrowUp, CheckSquare, ChevronDown, ChevronRight, Copy, Eye, Hash, History, Image, List,
+  ArrowDown, ArrowLeft, ArrowUp, CalendarDays, CheckSquare, Clock, ChevronDown, ChevronRight, Copy, Eye, Hash, History, Image, List,
   PenLine, Plus, Rocket, Save, Table2, ToggleLeft, Trash2, Type,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -19,7 +19,7 @@ import { useIsDesktop } from '../../lib/useMediaQuery';
 const rid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 8)}`;
 
 const TYPE_ICON: Record<QuestionType, typeof Type> = {
-  pass_fail_na: CheckSquare, yes_no: ToggleLeft, text: Type, number: Hash, dropdown: List, photo: Image, signature: PenLine, table: Table2,
+  pass_fail_na: CheckSquare, yes_no: ToggleLeft, text: Type, number: Hash, dropdown: List, photo: Image, signature: PenLine, table: Table2, date: CalendarDays, datetime: Clock,
 };
 
 const DEFAULT_COLUMNS: TableColumn[] = [
@@ -417,6 +417,10 @@ export default function TemplateBuilderPage() {
             onChange={(v) => updateSchema({ ...schema, settings: { ...schema.settings, requireProject: v } })} />
           <Checkbox label="Requires supervisor sign-off" checked={!!schema.settings?.requireSignOff}
             onChange={(v) => updateSchema({ ...schema, settings: { ...schema.settings, requireSignOff: v } })} />
+          {meta.category === 'plant_prestart' && (
+            <Checkbox label="Pick a vehicle from the register (critical fails tag it out of service)" checked={!!schema.settings?.requireVehicle}
+              onChange={(v) => updateSchema({ ...schema, settings: { ...schema.settings, requireVehicle: v || undefined } })} />
+          )}
         </div>
         {moduleStatuses.length > 0 && (
           <Field label="When a critical item fails on submit, set status to" hint="Mark questions as Critical in their settings. Leave as default to use the normal submitted status (or Defect Reported if the pipeline has it).">
