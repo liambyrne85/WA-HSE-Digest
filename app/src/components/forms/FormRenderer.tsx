@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { AlertTriangle, Camera, Eraser, ImagePlus, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api';
+import { blobToDataUrl, compressImage } from '../../lib/image';
 import { perthNowLocal, perthToday } from '../../lib/labels';
 import type { LookupValue, Question, TableColumn, TemplateSchema } from '../../lib/types';
 import { Button, Input, Select, Textarea } from '../ui';
@@ -97,7 +98,7 @@ export function SignaturePad({ value, onChange, disabled }: { value?: string; on
 // Photo capture (opens rear camera on mobile). Preview-only in Phase 1;
 // Phase 2 modules upload to the `form-uploads/{organization_id}/…` bucket.
 // ---------------------------------------------------------------------------
-function PhotoInput({ value, onChange, required }: { value?: string[]; onChange: (v: string[]) => void; required?: boolean }) {
+export function PhotoInput({ value, onChange, required }: { value?: string[]; onChange: (v: string[]) => void; required?: boolean }) {
   const photos = value ?? [];
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -122,11 +123,9 @@ function PhotoInput({ value, onChange, required }: { value?: string[]; onChange:
       <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          Promise.all(files.map((f) => new Promise<string>((res) => {
-            const r = new FileReader();
-            r.onload = () => res(r.result as string);
-            r.readAsDataURL(f);
-          }))).then((urls) => onChange([...photos, ...urls]));
+          // Compressed and date/time-stamped on the phone: small enough for poor coverage and offline storage.
+          Promise.all(files.map(async (f) => blobToDataUrl(await compressImage(f, { stamp: true }))))
+            .then((urls) => onChange([...photos, ...urls]));
           e.target.value = '';
         }} />
     </div>

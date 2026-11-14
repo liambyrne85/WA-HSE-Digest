@@ -1,5 +1,5 @@
 import {
-  Car, CheckSquare, ClipboardCheck, Clock, FileText, GraduationCap, Home, LayoutTemplate, MapPin, Palette, Search, Target,
+  Car, CheckSquare, Construction, SlidersHorizontal, ClipboardCheck, Clock, FileText, GraduationCap, Home, LayoutTemplate, MapPin, Palette, Search, Target,
   ShieldAlert, ShieldCheck, Truck, User, Users, Workflow, type LucideIcon,
 } from 'lucide-react';
 import type { AppRole } from '../../lib/types';
@@ -23,6 +23,7 @@ export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home, roles: ALL, section: 'main' },
   { to: '/approvals', label: 'Approvals', icon: CheckSquare, roles: LEADS, section: 'main' },
   { to: '/projects', label: 'Projects & Sites', icon: MapPin, roles: ALL, section: 'main' },
+  { to: '/scaffolds', label: 'Scaffolds', icon: Construction, roles: ALL, section: 'modules' },
   { to: '/safety', label: 'Safety Events', icon: ShieldAlert, roles: ALL, section: 'modules' },
   { to: '/dfr', label: 'Daily Field Reports', icon: FileText, roles: ALL, section: 'modules' },
   { to: '/timesheets', label: 'Timesheets', icon: Clock, roles: ALL, section: 'modules' },
@@ -39,6 +40,7 @@ export const NAV: NavItem[] = [
   { to: '/people', label: 'People', icon: Users, roles: LEADS, section: 'admin', labelFor: { project_manager: 'My Team', supervisor: 'My Team' } },
   { to: '/admin/templates', label: 'Form Templates', icon: LayoutTemplate, roles: ADMIN_HSET, section: 'admin' },
   { to: '/admin/workflow', label: 'Workflow Settings', icon: Workflow, roles: ADMIN_HSET, section: 'admin' },
+  { to: '/admin/scaffolds', label: 'Scaffold Settings', icon: SlidersHorizontal, roles: ['admin'], section: 'admin' },
   { to: '/admin/branding', label: 'Branding', icon: Palette, roles: ['admin'], section: 'admin' },
   { to: '/profile', label: 'My Profile', icon: User, roles: ALL, section: 'account' },
 ];

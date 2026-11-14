@@ -6,13 +6,11 @@ import { Badge, ErrorBanner, Field, Select, Spinner } from '../components/ui';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../lib/api';
 import { MODULE_LABEL, MODULE_ROUTE } from '../lib/labels';
+import { newId } from '../lib/id';
+import { submitOrQueue } from '../lib/offline/outbox';
+import type { RecordRow } from '../lib/types';
 import { errMsg, useAsync } from '../lib/useAsync';
 
-const newId = () => (crypto as Crypto & { randomUUID?: () => string }).randomUUID?.()
-  ?? 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
 
 /** Fill in a new record (/records/new?template=…) or edit a draft / returned record (/records/:id/edit). */
 export default function RecordFormPage() {
@@ -67,9 +65,20 @@ export default function RecordFormPage() {
     }
     setBusy(true);
     try {
-      const row = await api.saveRecord({
-        id: recordId, template_version_id: data.version.id, project_id: projectId || null, vehicle_id: vehicleId || null, answers, status, isNew: !id,
-      });
+      const input = { id: recordId, template_version_id: data.version.id, project_id: projectId || null, vehicle_id: vehicleId || null, answers, status, isNew: !id };
+      let row: RecordRow;
+      if (!id) {
+        // New records work with no coverage: kept on the phone and sent when back in range.
+        const fleet = data.vehicles.find((v) => v.id === vehicleId)?.fleet_number;
+        const res = await submitOrQueue<RecordRow>({ id: recordId, kind: 'record', label: `${data.version.name}${fleet ? ` · ${fleet}` : ''}${status === 'draft' ? ' (draft)' : ''}`,
+          payload: input, link: `/records/${recordId}` });
+        if (res.queued) {
+          toast('Saved on this phone. It will send by itself when you have coverage.');
+          nav(MODULE_ROUTE[data.version.category as keyof typeof MODULE_ROUTE] ?? '/', { replace: true });
+          return;
+        }
+        row = res.result!;
+      } else row = await api.saveRecord(input);
       toast(inProgress ? `${row.reference} updated` : status === 'draft' ? `Draft saved (${row.reference})` : `${row.reference} submitted`);
       nav(`/records/${row.id}`, { replace: true });
     } catch (e) {

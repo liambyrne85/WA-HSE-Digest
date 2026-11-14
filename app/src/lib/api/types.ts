@@ -1,6 +1,7 @@
 import type {
   AppRole, AppSettings, AuditEntry, Investigation, LeadershipTarget, Vehicle, DirectoryEntry, FormTemplate, ProjectMember, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
   LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
+  Scaffold, ScaffoldChecklist, ChecklistSection, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass,
   WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger, RecordApproval, RecordEvent, RecordRow,
 } from '../types';
 
@@ -180,6 +181,24 @@ export interface Api {
   /** turn a stored file reference into a viewable URL */
   fileUrl(ref: string): Promise<string>;
   listDirectory(): Promise<DirectoryEntry[]>;
+
+  // scaffolds
+  listScaffolds(): Promise<Scaffold[]>;
+  /** register or edit; photos may be data: URLs (uploaded on save) */
+  saveScaffold(s: Partial<Scaffold>): Promise<Scaffold>;
+  listScaffoldInspections(scaffoldId?: string): Promise<ScaffoldInspection[]>;
+  getScaffoldInspection(id: string): Promise<ScaffoldInspection | null>;
+  /** sign off an inspection; idempotent on input.id so an offline retry never doubles up */
+  submitScaffoldInspection(input: ScaffoldInspectionInput): Promise<ScaffoldInspection>;
+  listScaffoldDefects(scaffoldId?: string): Promise<ScaffoldDefect[]>;
+  /** update owner / due date, or close with photos (data: URLs uploaded) */
+  saveScaffoldDefect(d: Partial<ScaffoldDefect> & { id: string }): Promise<ScaffoldDefect>;
+  getScaffoldChecklist(id?: string): Promise<ScaffoldChecklist | null>;
+  listScaffoldChecklists(): Promise<ScaffoldChecklist[]>;
+  /** Admin: publish a new checklist version */
+  publishScaffoldChecklist(sections: ChecklistSection[], changeNote?: string): Promise<ScaffoldChecklist>;
+  /** can the signed-in user sign off inspections, and with which licence class */
+  myInspectorStatus(): Promise<{ ok: boolean; licenceClass: LicenceClass | null; reason?: string }>;
 
   // branding
   getSettings(): Promise<AppSettings>;

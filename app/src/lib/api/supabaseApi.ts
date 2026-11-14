@@ -5,7 +5,9 @@ type RecordDetailEvents = RecordEvent[];
 import type {
   AppSettings, AuditEntry, DirectoryEntry, Investigation, LeadershipTarget, Vehicle, ProjectMember, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, WorkerTicket, WorkflowPipeline, WorkflowRule,
+  LicenceClass, Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
 } from '../types';
+import { newId } from '../id';
 
 function unwrap<T>(res: { data: T | null; error: { message: string } | null }): T {
   if (res.error) throw new Error(res.error.message);
@@ -64,6 +66,11 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       } else out[k] = v;
     }
     return out;
+  }
+
+  /** Upload any data: URLs in a list of photos; storage references pass through. */
+  async function uploadList(list: string[], folder: string, key: string) {
+    return (await uploadDataUrls({ [key]: list }, folder))[key] as string[];
   }
 
   return {
@@ -343,7 +350,7 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const fire = () => { clearTimeout(timer); timer = setTimeout(cb, 400); };
       const channel = sb.channel(`dash-${Math.random().toString(36).slice(2)}`);
-      for (const table of ['form_submissions', 'vehicles', 'investigations', 'leadership_targets']) {
+      for (const table of ['form_submissions', 'vehicles', 'investigations', 'leadership_targets', 'scaffolds', 'scaffold_inspections', 'scaffold_defects']) {
         channel.on('postgres_changes', { event: '*', schema: 'public', table }, fire);
       }
       channel.subscribe();
@@ -408,12 +415,96 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     },
 
     // ---- branding -----------------------------------------------------------
+    // ---- scaffolds ---------------------------------------------------------
+    async listScaffolds() {
+      return unwrap(await sb.from('scaffolds').select('*').is('archived_at', null).order('scaffold_number')) as Scaffold[];
+    },
+    async saveScaffold(input) {
+      const me = unwrap(await sb.from('profiles').select('organization_id').eq('id', await uid()).single()) as { organization_id: string };
+      const id = input.id ?? newId();
+      const { id: _i, scaffold_number: _n, qr_token: _q, created_at: _c, last_inspection_id: _l, last_inspected_at: _la, next_inspection_due: _nd, ...row } = input;
+      if (row.photos) row.photos = await uploadList(row.photos, `${me.organization_id}/${id}`, 'scaffold');
+      const exists = !!input.id && !!unwrap(await sb.from('scaffolds').select('id').eq('id', id).maybeSingle());
+      const q = exists ? sb.from('scaffolds').update(row).eq('id', id) : sb.from('scaffolds').insert({ ...row, id });
+      return unwrap(await q.select().single()) as Scaffold;
+    },
+    async listScaffoldInspections(scaffoldId) {
+      let q = sb.from('scaffold_inspections').select('*').is('archived_at', null).order('signed_at', { ascending: false });
+      if (scaffoldId) q = q.eq('scaffold_id', scaffoldId);
+      return unwrap(await q) as ScaffoldInspection[];
+    },
+    async getScaffoldInspection(id) {
+      return unwrap(await sb.from('scaffold_inspections').select('*').eq('id', id).maybeSingle()) as ScaffoldInspection | null;
+    },
+    async submitScaffoldInspection(input) {
+      // Already synced (an earlier attempt got through but the reply was lost)? Return it.
+      const existing = unwrap(await sb.from('scaffold_inspections').select('*').eq('id', input.id).maybeSingle()) as ScaffoldInspection | null;
+      if (existing) return existing;
+      const me = unwrap(await sb.from('profiles').select('organization_id').eq('id', await uid()).single()) as { organization_id: string };
+      const folder = `${me.organization_id}/${input.id}`;
+      const items: ScaffoldInspection['items'] = {};
+      for (const [k, a] of Object.entries(input.items)) {
+        items[k] = a.photos?.length ? { ...a, photos: await uploadList(a.photos, folder, k) } : a;
+      }
+      const row = {
+        ...input, items, photos: await uploadList(input.photos, folder, 'general'),
+        signature: (await uploadList([input.signature], folder, 'signature'))[0]!,
+      };
+      const res = await sb.from('scaffold_inspections').insert(row).select().single();
+      if (res.error && /duplicate key/i.test(res.error.message)) {
+        return unwrap(await sb.from('scaffold_inspections').select('*').eq('id', input.id).single()) as ScaffoldInspection;
+      }
+      return unwrap(res) as ScaffoldInspection;
+    },
+    async listScaffoldDefects(scaffoldId) {
+      let q = sb.from('scaffold_defects').select('*').is('archived_at', null).order('due_date');
+      if (scaffoldId) q = q.eq('scaffold_id', scaffoldId);
+      return unwrap(await q) as ScaffoldDefect[];
+    },
+    async saveScaffoldDefect(d) {
+      const { id, owner_id, due_date, status, close_comment } = d;
+      const patch: Record<string, unknown> = Object.fromEntries(Object.entries({ owner_id, due_date, status, close_comment }).filter(([, v]) => v !== undefined));
+      if (d.close_photos) {
+        const me = unwrap(await sb.from('profiles').select('organization_id').eq('id', await uid()).single()) as { organization_id: string };
+        patch.close_photos = await uploadList(d.close_photos, `${me.organization_id}/${id}`, 'fix');
+      }
+      return unwrap(await sb.from('scaffold_defects').update(patch).eq('id', id).select().single()) as ScaffoldDefect;
+    },
+    async getScaffoldChecklist(id) {
+      const q = id ? sb.from('scaffold_checklists').select('*').eq('id', id)
+        : sb.from('scaffold_checklists').select('*').order('version', { ascending: false }).limit(1);
+      return unwrap(await q.maybeSingle()) as ScaffoldChecklist | null;
+    },
+    async listScaffoldChecklists() {
+      return unwrap(await sb.from('scaffold_checklists').select('*').order('version', { ascending: false })) as ScaffoldChecklist[];
+    },
+    async publishScaffoldChecklist(sections, changeNote) {
+      return unwrap(await sb.from('scaffold_checklists').insert({ version: 0, sections, change_note: changeNote ?? null }).select().single()) as ScaffoldChecklist;
+    },
+    async myInspectorStatus() {
+      const me = await uid();
+      const [profile, ok, cls, settings] = await Promise.all([
+        sb.from('profiles').select('is_scaffold_inspector').eq('id', me).single(),
+        sb.rpc('can_inspect_scaffolds', { p_profile_id: me }),
+        sb.rpc('scaffold_licence_class', { p_profile_id: me }),
+        sb.from('app_settings').select('scaffold_min_licence').eq('id', 1).single(),
+      ]);
+      const licenceClass = (cls.data as LicenceClass | null) ?? null;
+      const min = (settings.data as { scaffold_min_licence?: string } | null)?.scaffold_min_licence ?? 'Basic';
+      if (ok.data === true) return { ok: true, licenceClass };
+      const reason = !(profile.data as { is_scaffold_inspector?: boolean } | null)?.is_scaffold_inspector
+        ? 'You are not marked as a competent scaffold inspector on your profile.'
+        : !licenceClass ? 'You need a current scaffolding licence (HRW) on your profile.'
+        : `Your ${licenceClass} licence is below the minimum (${min}) for signing off inspections.`;
+      return { ok: false, licenceClass, reason };
+    },
+
     async getSettings() {
       return unwrap(await sb.from('app_settings').select('*').eq('id', 1).single()) as AppSettings;
     },
     async saveSettings(patch) {
-      const { company_name, primary_color, accent_color, dark_color, logo_url } = patch;
-      const clean = Object.fromEntries(Object.entries({ company_name, primary_color, accent_color, dark_color, logo_url }).filter(([, v]) => v !== undefined));
+      const { company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence } = patch;
+      const clean = Object.fromEntries(Object.entries({ company_name, primary_color, accent_color, dark_color, logo_url, scaffold_min_licence }).filter(([, v]) => v !== undefined));
       return unwrap(await sb.from('app_settings').update({ ...clean, updated_by: await uid() }).eq('id', 1).select().single()) as AppSettings;
     },
     async uploadLogo(file) {

@@ -1,9 +1,11 @@
 import { clsx } from 'clsx';
-import { Bell, ChevronRight, LogOut, Menu, Plus, X } from 'lucide-react';
+import { Bell, ChevronRight, CloudOff, CloudUpload, LogOut, Menu, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../lib/api';
+import { useOutbox } from '../../lib/offline/outbox';
+import { useConfirm } from '../../contexts/ConfirmContext';
 import { ROLE_COLOR, ROLE_LABEL, formatDate } from '../../lib/labels';
 import type { Notification } from '../../lib/types';
 import { Avatar, Badge } from '../ui';
@@ -64,6 +66,59 @@ function UserChip({ compact }: { compact?: boolean }) {
           <p className="truncate text-sm font-bold text-white">{profile.full_name}</p>
           <Badge color={ROLE_COLOR[role]} className="mt-0.5">{ROLE_LABEL[role]}</Badge>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Offline / waiting-to-sync indicator. Items stay on the phone until they're sent. */
+function SyncChip() {
+  const { items, syncing, online, flush, remove } = useOutbox();
+  const [open, setOpen] = useState(false);
+  const confirm = useConfirm();
+  const failed = items.filter((i) => i.error);
+  if (online && !items.length) return null;
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} aria-label={online ? `${items.length} to sync` : `Offline${items.length ? ` · ${items.length} to sync` : ''}`}
+        className={clsx('flex h-11 items-center gap-1.5 rounded-lg px-2.5 text-sm font-bold',
+          failed.length ? 'bg-red-100 text-red-800' : online ? 'bg-blue-50 text-blue-800' : 'bg-amber-100 text-amber-900')}>
+        {online ? <CloudUpload className={clsx('h-5 w-5', syncing && 'animate-pulse')} /> : <CloudOff className="h-5 w-5" />}
+        <span>{online ? '' : 'Offline'}{items.length ? `${online ? '' : ' · '}${items.length} to sync` : ''}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-40 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-steel-200 bg-white shadow-xl">
+            <p className="border-b border-steel-200 px-4 py-3 font-display text-lg font-bold uppercase">Saved on this phone</p>
+            <p className="px-4 pt-3 text-sm text-steel-600">{online ? 'These are sent automatically. Tap Sync now to try straight away.' : "No coverage. These will send by themselves when you're back in range — keep the app installed."}</p>
+            <ul className="max-h-72 divide-y divide-steel-100 overflow-y-auto">
+              {items.map((i) => (
+                <li key={i.id} className="px-4 py-3 text-sm">
+                  <p className="font-semibold">{i.label}</p>
+                  <p className="text-xs text-steel-500">Saved {formatDate(i.created_at)} {new Date(i.created_at).toLocaleTimeString('en-AU', { timeZone: 'Australia/Perth', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}</p>
+                  {i.error && (
+                    <div className="mt-1 rounded bg-red-50 p-2 text-xs text-red-800">
+                      Couldn't send: {i.error}
+                      <button className="ml-2 inline-flex items-center gap-1 font-bold underline" onClick={async () => {
+                        if (await confirm({ title: 'Discard', message: `Discard “${i.label}”? It hasn't been sent and will be lost.`, confirmLabel: 'Discard', danger: true })) void remove(i.id);
+                      }}><Trash2 className="h-3.5 w-3.5" />Discard</button>
+                    </div>
+                  )}
+                </li>
+              ))}
+              {!items.length && <li className="px-4 py-4 text-sm text-steel-500">Nothing waiting.</li>}
+            </ul>
+            {online && items.length > 0 && (
+              <div className="border-t border-steel-200 p-3">
+                <button onClick={() => void flush()} disabled={syncing}
+                  className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-lg bg-brand-500 font-bold text-white disabled:opacity-60">
+                  <RefreshCw className={clsx('h-5 w-5', syncing && 'animate-spin')} />{syncing ? 'Syncing…' : 'Sync now'}
+                </button>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -181,25 +236,24 @@ function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 function BottomNav({ onQuick, onMenu }: { onQuick: () => void; onMenu: () => void }) {
   const { role } = useAuth();
-  const training = role === 'worker' ? 'Licences' : 'Licences';
   const item = 'flex min-h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[11px] font-bold uppercase tracking-wide';
   const cls = ({ isActive }: { isActive: boolean }) => clsx(item, isActive ? 'text-brand-600' : 'text-steel-500');
   const navItems = navFor(role!);
   const Home = navItems.find((n) => n.to === '/')!.icon;
-  const Projects = navItems.find((n) => n.to === '/projects')!.icon;
+  const Scaffolds = navItems.find((n) => n.to === '/scaffolds')!.icon;
   const Training = navItems.find((n) => n.to === '/training')!.icon;
   return (
     <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t-2 border-steel-200 bg-white lg:hidden" aria-label="Primary">
       <div className="mx-auto flex max-w-lg items-stretch">
         <NavLink to="/" end className={cls}><Home className="h-6 w-6" />Home</NavLink>
-        <NavLink to="/projects" className={cls}><Projects className="h-6 w-6" />Sites</NavLink>
+        <NavLink to="/scaffolds" className={cls}><Scaffolds className="h-6 w-6" />Scaffolds</NavLink>
         <div className="flex flex-1 items-start justify-center">
           <button onClick={onQuick} aria-label="Quick log"
             className="-mt-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-hivis-500 text-steel-900 shadow-lg shadow-steel-900/30 ring-4 ring-white active:bg-hivis-400">
             <Plus className="h-8 w-8" strokeWidth={3} />
           </button>
         </div>
-        <NavLink to="/training" className={cls}><Training className="h-6 w-6" />{training}</NavLink>
+        <NavLink to="/training" className={cls}><Training className="h-6 w-6" />Licences</NavLink>
         <button onClick={onMenu} className={clsx(item, 'text-steel-500')}><Menu className="h-6 w-6" />More</button>
       </div>
     </nav>
@@ -244,6 +298,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {api.mode === 'demo' && <Badge color="amber">Demo data</Badge>}
         </div>
         <div className="flex items-center gap-1">
+          <SyncChip />
           <NotificationBell />
           <Link to="/profile" className="lg:hidden" aria-label="My profile"><Avatar name={profile?.full_name ?? ''} size="sm" /></Link>
         </div>

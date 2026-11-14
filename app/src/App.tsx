@@ -21,6 +21,11 @@ import PeoplePage from './pages/admin/PeoplePage';
 import PersonPage from './pages/PersonPage';
 import WorkflowPage from './pages/admin/WorkflowPage';
 import VehiclesPage from './pages/VehiclesPage';
+import ScaffoldsPage from './pages/scaffolds/ScaffoldsPage';
+import ScaffoldDetailPage from './pages/scaffolds/ScaffoldDetailPage';
+import ScaffoldInspectPage from './pages/scaffolds/ScaffoldInspectPage';
+import ScaffoldInspectionPage from './pages/scaffolds/ScaffoldInspectionPage';
+import ScaffoldSettingsPage from './pages/admin/ScaffoldSettingsPage';
 import InvestigationsPage, { InvestigationDetailPage } from './pages/InvestigationsPage';
 
 /** UI-level guard. Real enforcement is Postgres RLS; this just keeps users out of screens they can't use. */
@@ -67,6 +72,11 @@ export default function App() {
         <Route path="/risk" element={<ModulePage key="risk_assessment" module="risk_assessment" />} />
         <Route path="/leadership" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><ModulePage key="field_leadership" module="field_leadership" /></RequireRole>} />
         <Route path="/vehicles" element={<VehiclesPage />} />
+        <Route path="/scaffolds" element={<ScaffoldsPage />} />
+        <Route path="/scaffolds/inspections/:id" element={<ScaffoldInspectionPage />} />
+        <Route path="/scaffolds/:id" element={<ScaffoldDetailPage />} />
+        <Route path="/scaffolds/:id/inspect" element={<ScaffoldInspectPage />} />
+        <Route path="/admin/scaffolds" element={<RequireRole roles={['admin']}><ScaffoldSettingsPage /></RequireRole>} />
         <Route path="/investigations" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><InvestigationsPage /></RequireRole>} />
         <Route path="/investigations/:id" element={<InvestigationDetailPage />} />
         <Route path="/audits" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><ModulePage key="audit" module="audit" /></RequireRole>} />
