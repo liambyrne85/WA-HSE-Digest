@@ -21,6 +21,8 @@ import PeoplePage from './pages/admin/PeoplePage';
 import PersonPage from './pages/PersonPage';
 import WorkflowPage from './pages/admin/WorkflowPage';
 import VehiclesPage from './pages/VehiclesPage';
+import ActionsPage from './pages/ActionsPage';
+import ActionDetailPage from './pages/ActionDetailPage';
 import ScaffoldsPage from './pages/scaffolds/ScaffoldsPage';
 import ScaffoldDetailPage from './pages/scaffolds/ScaffoldDetailPage';
 import ScaffoldInspectPage from './pages/scaffolds/ScaffoldInspectPage';
@@ -72,6 +74,8 @@ export default function App() {
         <Route path="/risk" element={<ModulePage key="risk_assessment" module="risk_assessment" />} />
         <Route path="/leadership" element={<RequireRole roles={['admin', 'hset', 'project_manager', 'supervisor']}><ModulePage key="field_leadership" module="field_leadership" /></RequireRole>} />
         <Route path="/vehicles" element={<VehiclesPage />} />
+        <Route path="/actions" element={<ActionsPage />} />
+        <Route path="/actions/:id" element={<ActionDetailPage />} />
         <Route path="/scaffolds" element={<ScaffoldsPage />} />
         <Route path="/scaffolds/inspections/:id" element={<ScaffoldInspectionPage />} />
         <Route path="/scaffolds/:id" element={<ScaffoldDetailPage />} />

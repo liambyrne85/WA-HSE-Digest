@@ -1,6 +1,7 @@
 import type {
   AppRole, AppSettings, AuditEntry, Investigation, LeadershipTarget, Vehicle, DirectoryEntry, FormTemplate, ProjectMember, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
   LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
+  Action, ActionInput, ActionCloseInput, ActionStatus,
   Scaffold, ScaffoldChecklist, ChecklistSection, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass,
   WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger, RecordApproval, RecordEvent, RecordRow,
 } from '../types';
@@ -181,6 +182,17 @@ export interface Api {
   /** turn a stored file reference into a viewable URL */
   fileUrl(ref: string): Promise<string>;
   listDirectory(): Promise<DirectoryEntry[]>;
+
+  // actions
+  listActions(filter?: { submissionId?: string; investigationId?: string }): Promise<Action[]>;
+  getAction(id: string): Promise<Action | null>;
+  /** people an action on this project can be assigned to (project members, Admin/HSET) */
+  listAssignable(projectId: string | null): Promise<DirectoryEntry[]>;
+  raiseAction(input: ActionInput): Promise<Action>;
+  /** raiser / Admin / HSET / project lead: edit, reassign, reopen or cancel (status_note = reason) */
+  updateAction(id: string, patch: Partial<ActionInput> & { status?: ActionStatus; status_note?: string }): Promise<Action>;
+  /** the person assigned closes out with a comment and evidence (data: URLs uploaded); idempotent */
+  closeAction(input: ActionCloseInput): Promise<Action>;
 
   // scaffolds
   listScaffolds(): Promise<Scaffold[]>;

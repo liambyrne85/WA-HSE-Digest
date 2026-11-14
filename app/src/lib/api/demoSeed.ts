@@ -1,7 +1,7 @@
 import type {
   AppSettings, AuditEntry, Investigation, LeadershipTarget, ProjectMember, Vehicle, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, TemplateSchema, WorkerTicket, WorkflowPipeline, WorkflowRule,
-  Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
+  Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection, Action,
 } from '../types';
 import { STARTER_CHECKLIST } from '../scaffoldLogic';
 
@@ -38,6 +38,8 @@ export interface DemoDb {
   scaffoldCounters: Record<string, number>;
   siCounter: number;
   sdCounter: number;
+  actions: Action[];
+  actCounter: number;
 }
 
 const now = new Date().toISOString();
@@ -276,6 +278,14 @@ STARTER_TEMPLATES.push(
           { id: 'q-fl-obs', label: 'Observations', type: 'text', required: true, multiline: true },
           { id: 'q-fl-photos', label: 'Photos', type: 'photo', required: false },
         ] },
+        { id: 's-fl-checks', title: 'What did you see?', questions: [
+          { id: 'q-fl-ppe', label: 'Everyone in the area wearing the right PPE?', type: 'yes_no', required: false },
+          { id: 'q-fl-zones', label: 'Exclusion zones and barricades in place?', type: 'yes_no', required: false },
+          { id: 'q-fl-tags', label: 'Scaff tags current and displayed at access points?', type: 'yes_no', required: false },
+          { id: 'q-fl-height', label: 'Tools and materials secured at height (tethers, toeboards)?', type: 'yes_no', required: false },
+          { id: 'q-fl-house', label: 'Housekeeping OK and access ways clear?', type: 'yes_no', required: false },
+          { id: 'q-fl-permits', label: 'Permits, JHAs and Take 5s done and on site?', type: 'yes_no', required: false },
+        ] },
       ],
     },
   },
@@ -469,6 +479,8 @@ export function buildDemoSeed(): DemoDb {
     scaffoldCounters: {},
     siCounter: 0,
     sdCounter: 0,
+    actions: [],
+    actCounter: 0,
     records: [],
     approvals: [],
     events: [],

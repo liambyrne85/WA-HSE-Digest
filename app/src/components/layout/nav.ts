@@ -1,5 +1,5 @@
 import {
-  Car, CheckSquare, Construction, SlidersHorizontal, ClipboardCheck, Clock, FileText, GraduationCap, Home, LayoutTemplate, MapPin, Palette, Search, Target,
+  Car, CheckSquare, ListChecks, Construction, SlidersHorizontal, ClipboardCheck, Clock, FileText, GraduationCap, Home, LayoutTemplate, MapPin, Palette, Search, Target,
   ShieldAlert, ShieldCheck, Truck, User, Users, Workflow, type LucideIcon,
 } from 'lucide-react';
 import type { AppRole } from '../../lib/types';
@@ -21,6 +21,7 @@ const ADMIN_HSET: AppRole[] = ['admin', 'hset'];
 
 export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home, roles: ALL, section: 'main' },
+  { to: '/actions', label: 'Actions', icon: ListChecks, roles: ALL, section: 'main' },
   { to: '/approvals', label: 'Approvals', icon: CheckSquare, roles: LEADS, section: 'main' },
   { to: '/projects', label: 'Projects & Sites', icon: MapPin, roles: ALL, section: 'main' },
   { to: '/scaffolds', label: 'Scaffolds', icon: Construction, roles: ALL, section: 'modules' },

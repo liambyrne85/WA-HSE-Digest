@@ -8,6 +8,8 @@ import { api } from '../lib/api';
 import { MODULE_LABEL, MODULE_ROUTE } from '../lib/labels';
 import { newId } from '../lib/id';
 import { submitOrQueue } from '../lib/offline/outbox';
+import { ACTION_KEY, InlineActionEditor, isInlineActionKey, type InlineAction } from '../components/actions/InlineAction';
+import { useAuth } from '../contexts/AuthContext';
 import type { RecordRow } from '../lib/types';
 import { errMsg, useAsync } from '../lib/useAsync';
 
@@ -48,8 +50,23 @@ export default function RecordFormPage() {
     return { version, answers: {} as Answers, record: null, projects, vehicles };
   }, [id, templateId]);
 
-  const save = async (answers: Answers, requested: 'draft' | 'submitted') => {
+  const { profile } = useAuth();
+  const module0 = data?.version.category;
+  const actionsAllowed = module0 === 'audit' || module0 === 'field_leadership';
+  const { data: assignable } = useAsync(async () => (actionsAllowed ? api.listAssignable(projectId || null).catch(() => []) : []), [projectId, actionsAllowed]);
+
+  const save = async (rawAnswers: Answers, requested: 'draft' | 'submitted') => {
     if (!data) return;
+    // Actions raised from No / Fail answers: kept with a draft, created when submitted.
+    const qLabel = (qid: string) => data.version.schema.sections.flatMap((s) => s.questions).find((q) => q.id === qid)?.label ?? '';
+    const inline = Object.entries(rawAnswers).filter(([k, v]) => isInlineActionKey(k) && (v as InlineAction | undefined)?.enabled)
+      .map(([k, v]) => ({ qid: k.replace(/__action$/, ''), a: v as InlineAction }))
+      .filter(({ qid }) => ['no', 'fail'].includes(String(rawAnswers[qid])));
+    if (requested === 'submitted') {
+      const missing = inline.find(({ a }) => !a.title.trim() || !a.assignee_id || !a.due_date);
+      if (missing) { toast(`Finish the action for “${qLabel(missing.qid)}” (who it's assigned to), or remove it`, 'error'); return; }
+    }
+    const answers = requested === 'submitted' ? Object.fromEntries(Object.entries(rawAnswers).filter(([k]) => !isInlineActionKey(k))) : rawAnswers;
     // A leader correcting a record that's already in progress keeps its current status.
     const inProgress = data.record && !['draft', 'rejected', 'returned'].includes(data.record.status);
     const status = inProgress ? data.record!.status : requested;
@@ -63,6 +80,19 @@ export default function RecordFormPage() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+    // Raise each inline action (queued behind the record when offline, so it never arrives first).
+    async function raiseInline(queueOnly: boolean) {
+      let n = 0;
+      for (const { qid, a } of inline) {
+        const answer = String(rawAnswers[qid]) === 'fail' ? 'Fail' : 'No';
+        await submitOrQueue({ id: `raise-${a.id}`, kind: 'action_raise', label: `Action · ${a.title}`,
+          payload: { id: a.id, submission_id: recordId, title: a.title.trim(), description: `Raised from “${qLabel(qid)}” answered ${answer}.`,
+            priority: a.priority, assignee_id: a.assignee_id, due_date: a.due_date }, link: `/records/${recordId}` }, { queueOnly })
+          .then(() => { n++; })
+          .catch((e) => toast(`Action “${a.title}” not raised: ${errMsg(e)}`, 'error'));
+      }
+      return n;
+    }
     setBusy(true);
     try {
       const input = { id: recordId, template_version_id: data.version.id, project_id: projectId || null, vehicle_id: vehicleId || null, answers, status, isNew: !id };
@@ -73,13 +103,15 @@ export default function RecordFormPage() {
         const res = await submitOrQueue<RecordRow>({ id: recordId, kind: 'record', label: `${data.version.name}${fleet ? ` · ${fleet}` : ''}${status === 'draft' ? ' (draft)' : ''}`,
           payload: input, link: `/records/${recordId}` });
         if (res.queued) {
-          toast('Saved on this phone. It will send by itself when you have coverage.');
+          if (requested === 'submitted') await raiseInline(true);
+          toast(`Saved on this phone${inline.length && requested === 'submitted' ? ` with ${inline.length} action${inline.length === 1 ? '' : 's'}` : ''}. It will send by itself when you have coverage.`);
           nav(MODULE_ROUTE[data.version.category as keyof typeof MODULE_ROUTE] ?? '/', { replace: true });
           return;
         }
         row = res.result!;
       } else row = await api.saveRecord(input);
-      toast(inProgress ? `${row.reference} updated` : status === 'draft' ? `Draft saved (${row.reference})` : `${row.reference} submitted`);
+      const raised = requested === 'submitted' ? await raiseInline(false) : 0;
+      toast(inProgress ? `${row.reference} updated` : status === 'draft' ? `Draft saved (${row.reference})` : `${row.reference} submitted${raised ? ` with ${raised} action${raised === 1 ? '' : 's'}` : ''}`);
       nav(`/records/${row.id}`, { replace: true });
     } catch (e) {
       toast(errMsg(e), 'error');
@@ -116,6 +148,10 @@ export default function RecordFormPage() {
           : data.record?.submitted_at ? 'Resubmit' : 'Submit'}
         onSubmit={(a) => save(a, 'submitted')}
         onSaveDraft={!data.record || data.record.status === 'draft' ? (a) => save(a, 'draft') : undefined}
+        negativeExtra={actionsAllowed ? (q, answers, setAnswer) => (
+          <InlineActionEditor q={q} value={answers[ACTION_KEY(q.id)] as InlineAction | undefined} onChange={(v) => setAnswer(ACTION_KEY(q.id), v)}
+            people={assignable ?? []} meId={profile?.id} />
+        ) : undefined}
         header={
           <div className="space-y-4 rounded-xl border-2 border-steel-200 bg-white p-4">
             {(data.version.schema.settings?.requireVehicle || vehicleId) && (

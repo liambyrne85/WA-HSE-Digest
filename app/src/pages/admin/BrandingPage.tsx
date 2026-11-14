@@ -61,6 +61,15 @@ export default function BrandingPage() {
           <Card title="Company">
             <Field label="Company name" required><Input value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} /></Field>
           </Card>
+          <Card title="Emails">
+            <p className="mb-3 text-sm text-steel-600">Actions, investigation reviews and workflow notifications are emailed as well as shown in the app.</p>
+            <Field label="Send emails from" hint="An address on a domain verified with the email service, e.g. Safety <safety@yourcompany.com.au>">
+              <Input value={form.email_from ?? ''} onChange={(e) => setForm({ ...form, email_from: e.target.value || null })} placeholder="Safety <safety@yourcompany.com.au>" />
+            </Field>
+            <Field label="App address (for links in emails)">
+              <Input value={form.app_url ?? ''} onChange={(e) => setForm({ ...form, app_url: e.target.value || null })} placeholder="https://…" />
+            </Field>
+          </Card>
           <Card title="Colours">
             <div className="grid gap-4 sm:grid-cols-3">
               <ColourField label="Primary" hint="Buttons, links, active menu" value={form.primary_color} onChange={(v) => setForm({ ...form, primary_color: v })} />

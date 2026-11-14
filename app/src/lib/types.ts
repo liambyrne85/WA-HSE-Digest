@@ -352,6 +352,16 @@ export interface Investigation {
   findings: string | null;
   root_cause: string | null;
   corrective_actions: string | null;
+  /** required to submit for review when no actions are raised */
+  no_actions_reason?: string | null;
+  submitted_for_review_at?: string | null;
+  submitted_for_review_by?: string | null;
+  /** reviewer's comment (also the reason when sent back) */
+  review_comment?: string | null;
+  /** reviewer confirms the actions address the gaps and root causes found */
+  actions_confirmed?: boolean;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
   opened_at: string;
   closed_at: string | null;
   created_at: string;
@@ -402,6 +412,10 @@ export interface AppSettings {
   accent_color: string;
   dark_color: string;
   logo_url: string | null;
+  /** sender address for emails (on a domain verified with the email service) */
+  email_from?: string | null;
+  /** web address of the app, used for links in emails */
+  app_url?: string | null;
   /** minimum scaffolding licence class to sign off an inspection */
   scaffold_min_licence?: LicenceClass;
 }
@@ -513,3 +527,36 @@ export interface ScaffoldDefect {
   closed_at: string | null;
   created_at: string;
 }
+
+// ---- Actions (raised on incidents, audits, field leadership and investigations) --
+export type ActionStatus = 'open' | 'closed' | 'cancelled';
+export type ActionPriority = 'low' | 'medium' | 'high';
+export interface Action {
+  id: string;
+  reference: string | null;
+  submission_id: string | null;
+  investigation_id: string | null;
+  source_module: string | null;
+  source_reference: string | null;
+  project_id: string | null;
+  organization_id: string | null;
+  title: string;
+  description: string | null;
+  priority: ActionPriority;
+  assignee_id: string;
+  due_date: string;
+  status: ActionStatus;
+  close_comment: string | null;
+  /** photos / files (data: URLs before upload, storage references after) */
+  close_evidence: string[];
+  closed_by: string | null;
+  closed_at: string | null;
+  /** reason given when reopened or cancelled */
+  status_note: string | null;
+  raised_by: string;
+  created_at: string;
+  updated_at?: string;
+}
+export type ActionInput = Pick<Action, 'title' | 'description' | 'priority' | 'assignee_id' | 'due_date'>
+  & { id?: string; submission_id?: string | null; investigation_id?: string | null };
+export interface ActionCloseInput { id: string; close_comment: string; close_evidence: string[] }

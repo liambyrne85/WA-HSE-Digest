@@ -240,7 +240,11 @@ function useLookupOptions(schema: TemplateSchema) {
   return (key?: string) => values.filter((v) => v.list_key === key).map((v) => v.label);
 }
 
-export function QuestionInput({ q, answers, setAnswer, errors }: { q: Question; answers: Answers; setAnswer: (id: string, v: unknown) => void; errors: Record<string, string>; }) {
+export function QuestionInput({ q, answers, setAnswer, errors, negativeExtra }: {
+  q: Question; answers: Answers; setAnswer: (id: string, v: unknown) => void; errors: Record<string, string>;
+  /** extra content under a No / Fail answer (e.g. raise an action) */
+  negativeExtra?: (q: Question, answers: Answers, setAnswer: (id: string, v: unknown) => void) => React.ReactNode;
+}) {
   const lookupOptions = useLookupOptions({ sections: [{ id: 'x', title: '', questions: [q] }] });
   const v = answers[q.id];
   const err = errors[q.id];
@@ -298,13 +302,15 @@ export function QuestionInput({ q, answers, setAnswer, errors }: { q: Question; 
           {errors[`${q.id}__photo`] && <p className="mt-1 text-xs font-semibold text-red-600">{errors[`${q.id}__photo`]}</p>}
         </div>
       )}
+      {negativeExtra && isNegative(q, v) && negativeExtra(q, answers, setAnswer)}
       {err && <p className="mt-2 text-xs font-bold uppercase text-red-600">{err}</p>}
     </div>
   );
 }
 
 /** Renders a template schema as a fillable, validated form. */
-export function FormRenderer({ schema, onSubmit, onSaveDraft, submitLabel = 'Submit', initialAnswers, busy, header }: {
+export function FormRenderer({ schema, onSubmit, onSaveDraft, submitLabel = 'Submit', initialAnswers, busy, header, negativeExtra }: {
+  negativeExtra?: (q: Question, answers: Answers, setAnswer: (id: string, v: unknown) => void) => React.ReactNode;
   schema: TemplateSchema;
   onSubmit?: (answers: Answers) => void;
   /** when given, shows a "Save draft" button that skips validation */
@@ -362,7 +368,7 @@ export function FormRenderer({ schema, onSubmit, onSaveDraft, submitLabel = 'Sub
             <span className="font-display text-xl font-bold uppercase tracking-wide text-steel-900">{s.title || 'Untitled section'}</span>
           </legend>
           {s.description && <p className="text-sm text-steel-600">{s.description}</p>}
-          {s.questions.map((q) => <QuestionInput key={q.id} q={q} answers={answers} setAnswer={setAnswer} errors={errors} />)}
+          {s.questions.map((q) => <QuestionInput key={q.id} q={q} answers={answers} setAnswer={setAnswer} errors={errors} negativeExtra={negativeExtra} />)}
           {!s.questions.length && <p className="rounded-lg border-2 border-dashed border-steel-200 p-4 text-center text-sm text-steel-400">No questions in this section yet.</p>}
         </fieldset>
       ))}
