@@ -5,7 +5,7 @@ select set_config('request.jwt.claims', '', false);
 -- Fixtures: a DFR version, plant pre-start version and safety event version ids.
 create temp table v as
 select (select current_version_id from public.form_templates where category = 'daily_field_report') as dfr,
-       (select current_version_id from public.form_templates where category = 'plant_prestart') as ps,
+       (select current_version_id from public.form_templates where category = 'plant_prestart' and name like 'Daily Plant Pre-Start%') as ps,
        (select current_version_id from public.form_templates where category = 'safety_event') as se;
 grant select on v to authenticated;
 create temp table ids (k text primary key, id uuid);
