@@ -17,7 +17,7 @@ grant select, insert on ids to authenticated;
 set role authenticated;
 select tests.login('22222222-2222-2222-2222-222222222222');
 insert into public.form_submissions (template_version_id, project_id, status, answers)
-select dfr, 'aaaaaaaa-0000-0000-0000-000000000002', 'submitted',
+select dfr, 'aaaaaaaa-0000-0000-0000-000000000001', 'submitted',
        '{"q-shift":"Day","q-crew":[{"name":"A","hours":"8"},{"name":"B","hours":"7.5"}],"q-work":"Bulk earthworks"}'
   from v;
 insert into ids select 'dfr1', id from public.form_submissions where submitted_by = auth.uid() order by created_at desc limit 1;
@@ -25,33 +25,38 @@ select tests.assert_count($$select 1 from public.form_submissions s join ids on 
   where s.reference like 'DFR-%' and s.status = 'submitted' and s.module = 'daily_field_report' and (s.summary->>'total_hours')::numeric = 15.5$$,
   1, 'DFR gets a reference, submitted status and total hours');
 select tests.assert_fails($$insert into public.form_submissions (template_version_id, status) select dfr, 'approved' from v$$,
-  'employee cannot create a record straight into "approved"');
+  'worker cannot create a record straight into "approved"');
 update public.form_submissions set status = 'approved' where id = (select id from ids where k = 'dfr1'); -- RLS: 0 rows
 select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'dfr1') and status = 'submitted'$$,
-  1, 'employee cannot change status of a submitted record');
+  1, 'worker cannot change status of a submitted record');
 reset role;
 
-select tests.assert_count($$select 1 from public.record_approvals a join ids on ids.id = a.submission_id and ids.k = 'dfr1' where a.status = 'pending' and a.approver_role = 'leader'$$,
-  1, 'DFR rule opened a leader approval');
+select tests.assert_count($$select 1 from public.record_approvals a join ids on ids.id = a.submission_id and ids.k = 'dfr1' where a.status = 'pending' and a.approver_role = 'admin'$$,
+  1, 'DFR rule opened an Admin approval');
 select tests.assert_count($$select 1 from public.notifications n join public.workflow_rules r on r.id = n.rule_id where r.name = 'DFR submitted for approval' and n.link like '/records/%'$$,
-  1, 'leader notified with a link to the record');
+  2, 'Admin and HSET notified with a link to the record');
 
 -- ---------------------------------------------------------------------------
 -- Visibility
 -- ---------------------------------------------------------------------------
 set role authenticated;
 select tests.login('33333333-3333-3333-3333-333333333333');
-select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'dfr1')$$, 0, 'contractor cannot see internal DFR');
+select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'dfr1')$$, 0, 'subcontractor supervisor cannot see internal DFR on same project');
+select tests.login('34444444-4444-4444-4444-444444444444');
 insert into public.form_submissions (template_version_id, project_id, status, answers)
 select dfr, 'aaaaaaaa-0000-0000-0000-000000000001', 'draft', '{}' from v;
 insert into ids select 'acme_draft', id from public.form_submissions where submitted_by = auth.uid() and status = 'draft' limit 1;
-select tests.login('34444444-4444-4444-4444-444444444444');
-select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'acme_draft')$$, 1, 'contractor crew-mate sees own company record');
+select tests.login('33333333-3333-3333-3333-333333333333');
+select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'acme_draft')$$, 1, 'Acme supervisor sees Acme worker record on their project');
+select tests.login('13131313-1313-1313-1313-131313131313');
+select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'acme_draft')$$, 1, 'internal PM sees subcontractor records on their project');
+select tests.login('45454545-4545-4545-4545-454545454545');
+select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'acme_draft')$$, 0, 'Bravo supervisor cannot see Acme records on the same project');
 select tests.login('44444444-4444-4444-4444-444444444444');
-select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'acme_draft')$$, 0, 'other contractor cannot see it');
-select tests.assert_count($$select 1 from public.record_events where submission_id = (select id from ids where k = 'acme_draft')$$, 0, 'other contractor cannot see its history');
+select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'acme_draft')$$, 0, 'other worker cannot see it');
+select tests.assert_count($$select 1 from public.record_events where submission_id = (select id from ids where k = 'acme_draft')$$, 0, 'other worker cannot see its history');
 select tests.assert_fails($$insert into public.record_events (submission_id, kind, body, actor) values ((select id from ids where k = 'acme_draft'), 'comment', 'hi', auth.uid())$$,
-  'other contractor cannot comment on it');
+  'other worker cannot comment on it');
 select tests.login('22222222-2222-2222-2222-222222222222');
 insert into public.record_events (submission_id, kind, body, actor) values ((select id from ids where k = 'dfr1'), 'comment', 'Rain from 2pm', auth.uid());
 select tests.assert_count($$select 1 from public.record_events where kind = 'comment' and body = 'Rain from 2pm'$$, 1, 'submitter can comment');
@@ -63,7 +68,7 @@ reset role;
 set role authenticated;
 select tests.login('22222222-2222-2222-2222-222222222222');
 select tests.assert_fails($$select public.decide_approval((select a.id from public.record_approvals a join ids on ids.id = a.submission_id and ids.k = 'dfr1'), 'approved')$$,
-  'employee cannot approve a leader step');
+  'worker cannot approve an Admin step');
 select tests.login('11111111-1111-1111-1111-111111111111');
 select public.decide_approval((select a.id from public.record_approvals a join ids on ids.id = a.submission_id and ids.k = 'dfr1'), 'approved', 'Looks good');
 select tests.assert_count($$select 1 from public.form_submissions where id = (select id from ids where k = 'dfr1') and status = 'approved'$$, 1, 'approval moves DFR to Approved');
@@ -92,14 +97,14 @@ select tests.assert_count($$select 1 from public.record_approvals a join ids on 
 -- Plant pre-start with a critical fail -> Defect Reported + alert
 -- ---------------------------------------------------------------------------
 set role authenticated;
-select tests.login('33333333-3333-3333-3333-333333333333');
+select tests.login('34444444-4444-4444-4444-444444444444');
 insert into public.form_submissions (template_version_id, project_id, status, answers)
 select ps, 'aaaaaaaa-0000-0000-0000-000000000001', 'submitted', '{"q-plant":"Excavator","q-seatbelt":"fail"}' from v;
 reset role;
 select tests.assert_count($$select 1 from public.form_submissions where module = 'plant_prestart' and status = 'defect_reported'
   and (summary->>'critical_failures')::int = 1 and summary->>'plant_category' = 'Excavator'$$, 1, 'critical fail -> Defect Reported, lookup field derived');
 select tests.assert_count($$select 1 from public.notifications n join public.workflow_rules r on r.id = n.rule_id where r.name = 'Plant defect reported'$$,
-  1, 'plant defect rule alerted leaders');
+  2, 'plant defect rule alerted Admin and HSET');
 
 -- ---------------------------------------------------------------------------
 -- Safety event severity from a lookup dropdown drives the High severity rule
@@ -113,19 +118,19 @@ select tests.assert_count($$select 1 from public.form_submissions where module =
   1, 'safety event numbered SE-00001 with severity field');
 select tests.assert_count($$select 1 from public.record_approvals a join public.form_submissions s on s.id = a.submission_id where s.module = 'safety_event' and a.status = 'pending'$$,
   1, 'high severity rule opened a leader approval');
-select tests.assert_count($$select 1 from public.notifications where body like 'SE-00001:%'$$, 1, 'alert names the record reference');
+select tests.assert_count($$select 1 from public.notifications where body like 'SE-00001:%'$$, 2, 'alert names the record reference');
 
--- Branding readable signed-out; only leaders can change it
+-- Branding readable signed-out; only admins can change it
 set role anon;
 select tests.assert_count($$select 1 from public.app_settings where company_name <> ''$$, 1, 'branding readable before sign-in');
 reset role;
 set role authenticated;
 select tests.login('22222222-2222-2222-2222-222222222222');
 update public.app_settings set company_name = 'Hacked';
-select tests.assert_count($$select 1 from public.app_settings where company_name = 'Hacked'$$, 0, 'employee cannot change branding');
+select tests.assert_count($$select 1 from public.app_settings where company_name = 'Hacked'$$, 0, 'worker cannot change branding');
 select tests.login('11111111-1111-1111-1111-111111111111');
 update public.app_settings set primary_color = '#123456';
-select tests.assert_count($$select 1 from public.app_settings where primary_color = '#123456'$$, 1, 'leader can change branding');
+select tests.assert_count($$select 1 from public.app_settings where primary_color = '#123456'$$, 1, 'admin can change branding');
 reset role;
 
 -- Rejecting in a pipeline with no Rejected/Returned status sends the record back as a draft.

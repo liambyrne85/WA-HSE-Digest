@@ -89,8 +89,8 @@ export default function TrainingPage() {
   }, [tickets, data]);
 
   const del = async (t: WorkerTicket) => {
-    if (!(await confirm({ title: 'Remove ticket', message: `Remove ${t.ticket_type}?`, confirmLabel: 'Remove', danger: true }))) return;
-    try { await api.deleteTicket(t.id); toast('Ticket removed'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
+    if (!(await confirm({ title: 'Archive licence', message: `Archive ${t.ticket_type}? It's kept in the history but no longer shown.`, confirmLabel: 'Archive' }))) return;
+    try { await api.archiveTicket(t.id); toast('Archived'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
   };
 
   const title = scope === 'me' ? 'My Training' : scope === 'crew' ? 'Crew & Tickets' : 'Training & Tickets';

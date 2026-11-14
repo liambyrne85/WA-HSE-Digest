@@ -18,7 +18,7 @@ import { errMsg, useAsync } from '../../lib/useAsync';
 type Tab = 'rules' | 'pipelines' | 'lists' | 'test';
 const MODULES = Object.keys(MODULE_LABEL) as WorkflowModule[];
 const TRIGGERS = Object.keys(TRIGGER_LABEL) as WorkflowTrigger[];
-const ROLES: AppRole[] = ['leader', 'employee', 'contractor'];
+const ROLES: AppRole[] = ['admin', 'hset', 'project_manager', 'supervisor', 'worker'];
 const COLORS: BadgeColor[] = ['slate', 'blue', 'amber', 'orange', 'green', 'red', 'purple'];
 const ACTION_META: Record<ActionType, { label: string; icon: typeof Bell }> = {
   in_app: { label: 'In-app alert', icon: Bell },
@@ -27,7 +27,7 @@ const ACTION_META: Record<ActionType, { label: string; icon: typeof Bell }> = {
 };
 
 function recipientLabel(r: string) {
-  if (r.startsWith('role:')) return `All ${ROLE_LABEL[r.slice(5) as AppRole] ?? r.slice(5)}s`;
+  if (r.startsWith('role:')) return r === 'role:hset' ? 'HSET' : `${ROLE_LABEL[r.slice(5) as AppRole] ?? r.slice(5)}s`;
   if (r === 'submitter') return 'Record submitter';
   if (r.startsWith('email:')) return r.slice(6);
   return r;
@@ -230,7 +230,7 @@ function RuleEditor({ initial, pipelines, values, jobRoles, templates, onClose, 
               <div className="min-w-[120px] flex-1">
                 <Field label="Approver role">
                   <Select value={s.role} onChange={(e) => setR({ ...r, approval_chain: r.approval_chain!.map((x, j) => (j === i ? { ...x, role: e.target.value as AppRole } : x)) })}>
-                    {ROLES.filter((x) => x !== 'contractor').map((x) => <option key={x} value={x}>{ROLE_LABEL[x]}</option>)}
+                    {ROLES.filter((x) => x !== 'worker').map((x) => <option key={x} value={x}>{ROLE_LABEL[x]}</option>)}
                   </Select>
                 </Field>
               </div>
@@ -252,7 +252,7 @@ function RuleEditor({ initial, pipelines, values, jobRoles, templates, onClose, 
             </div>
           ))}
           <Button size="sm" variant="secondary" icon={<Plus className="h-4 w-4" />}
-            onClick={() => setR({ ...r, approval_chain: [...(r.approval_chain ?? []), { step: (r.approval_chain?.length ?? 0) + 1, role: 'leader', sla_hours: 24 }] })}>
+            onClick={() => setR({ ...r, approval_chain: [...(r.approval_chain ?? []), { step: (r.approval_chain?.length ?? 0) + 1, role: 'admin', sla_hours: 24 }] })}>
             Add approval step
           </Button>
         </fieldset>
@@ -299,14 +299,14 @@ function RuleEditor({ initial, pipelines, values, jobRoles, templates, onClose, 
                         onClick={() => { setAction(i, { ...a, recipients: [...a.recipients, `email:${customEmail.trim()}`] }); setCustomEmail(''); }}>Add</Button>
                     </div>
                   )}
-                  {a.recipients.includes('role:contractor') && <p className="mt-1 text-xs text-steel-500">Contractors only receive alerts for their own company's records.</p>}
+                  {a.recipients.some((x) => ['role:project_manager', 'role:supervisor'].includes(x)) && <p className="mt-1 text-xs text-steel-500">Project Managers and Supervisors only get alerts for records on their projects (subcontractor leads: their own company's records only).</p>}
                 </div>
                 <Field label="Message"><Input value={a.message ?? ''} onChange={(e) => setAction(i, { ...a, message: e.target.value })} placeholder="Defaults to rule name" /></Field>
               </div>
             );
           })}
           <Button size="sm" variant="secondary" icon={<Plus className="h-4 w-4" />}
-            onClick={() => setR({ ...r, actions: [...(r.actions ?? []), { type: 'in_app', recipients: ['role:leader'] }] })}>
+            onClick={() => setR({ ...r, actions: [...(r.actions ?? []), { type: 'in_app', recipients: ['role:admin', 'role:hset'] }] })}>
             Add alert
           </Button>
         </fieldset>
@@ -482,7 +482,6 @@ function ListsTab({ lists, values, onChanged }: { lists: LookupList[]; values: L
   const [newCode, setNewCode] = useState('');
   const [newList, setNewList] = useState<{ name: string; key: string; visible: boolean } | null>(null);
   const toast = useToast();
-  const confirm = useConfirm();
   const list = lists.find((l) => l.key === key);
   const items = values.filter((v) => v.list_key === key).sort((a, b) => a.sort_order - b.sort_order);
 
@@ -539,8 +538,6 @@ function ListsTab({ lists, values, onChanged }: { lists: LookupList[]; values: L
                 <Toggle size="sm" checked={v.is_active} label={`${v.label} active`} onChange={(a) => run(() => api.saveLookupValue({ id: v.id, is_active: a }))} />
                 <Button variant="ghost" size="sm" aria-label="Move up" disabled={i === 0} icon={<ArrowUp className="h-4 w-4" />} onClick={() => swap(i, -1)} />
                 <Button variant="ghost" size="sm" aria-label="Move down" disabled={i === items.length - 1} icon={<ArrowDown className="h-4 w-4" />} onClick={() => swap(i, 1)} />
-                <Button variant="ghost" size="sm" aria-label={`Delete ${v.label}`} icon={<Trash2 className="h-4 w-4 text-red-600" />}
-                  onClick={async () => (await confirm({ title: 'Delete value', message: `Delete “${v.label}”? If it's used on existing records, switch it off instead.`, confirmLabel: 'Delete', danger: true })) && run(() => api.deleteLookupValue(v.id), 'Value deleted')} />
               </li>
             ))}
             {!items.length && <li className="px-3 py-6 text-center text-sm text-steel-500">No values yet.</li>}
@@ -672,8 +669,8 @@ export default function WorkflowPage() {
     }
   };
   const del = async (r: WorkflowRule) => {
-    if (!(await confirm({ title: 'Delete rule', message: `Delete rule “${r.name}”? This can't be undone.`, confirmLabel: 'Delete', danger: true }))) return;
-    try { await api.deleteRule(r.id); toast('Rule deleted'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
+    if (!(await confirm({ title: 'Archive rule', message: `Archive rule “${r.name}”? It stops running and is kept in the history.`, confirmLabel: 'Archive', danger: true }))) return;
+    try { await api.archiveRule(r.id); toast('Rule archived'); void reload(); } catch (e) { toast(errMsg(e), 'error'); }
   };
 
   return (

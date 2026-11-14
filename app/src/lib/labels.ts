@@ -3,20 +3,27 @@ import type {
   WorkflowModule, WorkflowTrigger,
 } from './types';
 
+export const ROLES: AppRole[] = ['admin', 'hset', 'project_manager', 'supervisor', 'worker'];
 export const ROLE_LABEL: Record<AppRole, string> = {
-  leader: 'Leader',
-  employee: 'Employee',
-  contractor: 'Contractor',
+  admin: 'Admin',
+  hset: 'HSET',
+  project_manager: 'Project Manager',
+  supervisor: 'Supervisor',
+  worker: 'Worker',
 };
 export const ROLE_COLOR: Record<AppRole, BadgeColor> = {
-  leader: 'purple',
-  employee: 'blue',
-  contractor: 'amber',
+  admin: 'purple',
+  hset: 'red',
+  project_manager: 'blue',
+  supervisor: 'green',
+  worker: 'slate',
 };
 export const ROLE_DESCRIPTION: Record<AppRole, string> = {
-  leader: 'Full access, approvals, templates & workflow admin',
-  employee: 'Internal field worker — own records, profile & training',
-  contractor: 'Scoped to their own company — crew, DFRs, pre-starts',
+  admin: 'Sees everything. Manages people, projects, settings and forms.',
+  hset: 'Sees everything. Manages safety forms, workflow and lists.',
+  project_manager: 'Sees the people and records on their assigned projects.',
+  supervisor: 'Sees the people and records on their assigned projects.',
+  worker: 'Sees their own submissions and their primary project.',
 };
 
 export const PROJECT_STATUS: Record<ProjectStatus, { label: string; color: BadgeColor }> = {
@@ -130,23 +137,56 @@ export const MODULE_ROUTE: Partial<Record<WorkflowModule, string>> = {
   audit: '/audits',
 };
 
-export function formatDateTime(d: string | null | undefined) {
-  if (!d) return '—';
-  return new Date(d).toLocaleString('en-AU', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
+// ---- Dates: DD/MM/YYYY, Australia/Perth, weeks Monday–Sunday ---------------
+export const TZ = 'Australia/Perth';
+const isDateOnly = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+
+/** Today's date in Perth as YYYY-MM-DD. */
+export function perthToday(at: Date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 }
 
+/** Add days to a YYYY-MM-DD date. */
+export function addDays(ymd: string, n: number) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y!, m! - 1, d! + n));
+  return t.toISOString().slice(0, 10);
+}
+
+/** Monday of the week containing ymd (Perth calendar). */
+export function weekStart(ymd: string = perthToday()) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dow = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay(); // 0 = Sunday
+  return addDays(ymd, dow === 0 ? -6 : 1 - dow);
+}
+
+/** DD/MM/YYYY. Accepts a YYYY-MM-DD date or a timestamp (shown in Perth time). */
 export function formatDate(d: string | null | undefined) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+  if (isDateOnly(d)) {
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
+  }
+  return new Intl.DateTimeFormat('en-AU', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(d));
 }
 
+/** DD/MM/YYYY HH:mm (24-hour, Perth time). */
+export function formatDateTime(d: string | null | undefined) {
+  if (!d) return '—';
+  const parts = new Intl.DateTimeFormat('en-AU', {
+    timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(d));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`;
+}
+
+/** Whole days from today (Perth) to a date; negative = in the past. */
 export function daysUntil(d: string | null | undefined) {
   if (!d) return null;
-  const t = new Date(d);
-  t.setHours(0, 0, 0, 0);
-  const n = new Date();
-  n.setHours(0, 0, 0, 0);
-  return Math.round((t.getTime() - n.getTime()) / 864e5);
+  const target = isDateOnly(d) ? d : perthToday(new Date(d));
+  const a = Date.parse(`${target}T00:00:00Z`);
+  const b = Date.parse(`${perthToday()}T00:00:00Z`);
+  return Math.round((a - b) / 864e5);
 }
 
 export function ticketState(expires: string | null): { label: string; color: BadgeColor } {

@@ -94,9 +94,9 @@ export default function RecordDetailPage() {
               {(r.status === 'draft' && !r.submitted_at && (isOwner || isLeader)) && (
                 <Button variant="ghost" className="!text-red-600" icon={<Trash2 className="h-4 w-4" />} disabled={busy}
                   onClick={async () => {
-                    if (!(await confirm({ title: 'Delete draft', message: `Delete ${r.reference}? This can't be undone.`, confirmLabel: 'Delete', danger: true }))) return;
-                    try { await api.deleteRecord(r.id); toast('Draft deleted'); nav(MODULE_ROUTE[r.module] ?? '/'); } catch (e) { toast(errMsg(e), 'error'); }
-                  }}>Delete draft</Button>
+                    if (!(await confirm({ title: 'Discard draft', message: `Discard ${r.reference}? It's archived and no longer shown.`, confirmLabel: 'Discard', danger: true }))) return;
+                    try { await api.archiveRecord(r.id); toast('Draft discarded'); nav(MODULE_ROUTE[r.module] ?? '/'); } catch (e) { toast(errMsg(e), 'error'); }
+                  }}>Discard draft</Button>
               )}
               {isLeader && r.status !== 'draft' && (
                 <div className="ml-auto flex items-end gap-2">

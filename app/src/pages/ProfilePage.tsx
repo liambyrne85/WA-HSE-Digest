@@ -4,7 +4,8 @@ import { Avatar, Badge, Button, Card, ErrorBanner, Field, Input, PageHeader } fr
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../lib/api';
-import { ROLE_COLOR, ROLE_DESCRIPTION, ROLE_LABEL } from '../lib/labels';
+import { LicencesPanel } from '../components/people/LicencesPanel';
+import { ROLE_COLOR, ROLE_DESCRIPTION, ROLE_LABEL, formatDate } from '../lib/labels';
 import type { Profile } from '../lib/types';
 import { errMsg, useAsync } from '../lib/useAsync';
 
@@ -48,7 +49,7 @@ export default function ProfilePage() {
   const [form, setForm] = useState<Partial<Profile>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data } = useAsync(() => Promise.all([api.listOrganizations(), api.listJobRoles()]), []);
+  const { data, reload } = useAsync(() => Promise.all([api.listOrganizations(), api.listJobRoles(), api.listTickets(), api.listLookupValues('ticket_types')]), []);
   useEffect(() => { if (profile) setForm(profile); }, [profile]);
   if (!profile) return null;
   const org = data?.[0].find((o) => o.id === profile.organization_id);
@@ -101,16 +102,20 @@ export default function ProfilePage() {
           <Button className="mt-4" icon={<Save className="h-5 w-5" />} loading={busy} onClick={save}>Save changes</Button>
         </Card>
 
+        {data && <LicencesPanel profileId={profile.id} tickets={data[2]} types={data[3]} canEdit canVerify={false} onChanged={reload} />}
+
         {api.mode === 'supabase' && <PasswordCard />}
 
         <Card title="Access">
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <div><dt className="text-xs font-bold uppercase text-steel-500">Company</dt><dd className="font-semibold">{org?.name ?? '—'}</dd></div>
-            <div><dt className="text-xs font-bold uppercase text-steel-500">Worker number</dt><dd className="font-semibold">{profile.employee_number ?? '—'}</dd></div>
+            <div><dt className="text-xs font-bold uppercase text-steel-500">Employee ID</dt><dd className="font-semibold">{profile.employee_number ?? '—'}</dd></div>
+            <div><dt className="text-xs font-bold uppercase text-steel-500">Start date</dt><dd className="font-semibold">{formatDate(profile.start_date)}</dd></div>
+            <div><dt className="text-xs font-bold uppercase text-steel-500">Competent scaffold inspector</dt><dd className="font-semibold">{profile.is_scaffold_inspector ? 'Yes' : 'No'}</dd></div>
             <div className="sm:col-span-2"><dt className="text-xs font-bold uppercase text-steel-500">What your role can do</dt><dd>{ROLE_DESCRIPTION[profile.role]}</dd></div>
           </dl>
           <p className="mt-4 flex items-center gap-2 rounded-lg bg-steel-50 p-3 text-xs text-steel-600">
-            <Lock className="h-4 w-4 shrink-0" /> Role, company, job role and worker number are managed by Leaders and can't be changed here.
+            <Lock className="h-4 w-4 shrink-0" /> Role, company, position, employee ID, start date and inspector status are managed by Admins.
           </p>
         </Card>
 
