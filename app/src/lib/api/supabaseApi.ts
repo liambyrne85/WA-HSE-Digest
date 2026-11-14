@@ -5,7 +5,7 @@ type RecordDetailEvents = RecordEvent[];
 import type {
   AppSettings, AuditEntry, DirectoryEntry, Investigation, LeadershipTarget, Vehicle, ProjectMember, RecordApproval, RecordRow, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, WorkerTicket, WorkflowPipeline, WorkflowRule,
-  LicenceClass, Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
+  Action, LicenceClass, Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
 } from '../types';
 import { newId } from '../id';
 
@@ -350,7 +350,7 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const fire = () => { clearTimeout(timer); timer = setTimeout(cb, 400); };
       const channel = sb.channel(`dash-${Math.random().toString(36).slice(2)}`);
-      for (const table of ['form_submissions', 'vehicles', 'investigations', 'leadership_targets', 'scaffolds', 'scaffold_inspections', 'scaffold_defects']) {
+      for (const table of ['form_submissions', 'vehicles', 'investigations', 'leadership_targets', 'scaffolds', 'scaffold_inspections', 'scaffold_defects', 'actions']) {
         channel.on('postgres_changes', { event: '*', schema: 'public', table }, fire);
       }
       channel.subscribe();
@@ -415,6 +415,35 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     },
 
     // ---- branding -----------------------------------------------------------
+    // ---- actions -----------------------------------------------------------
+    async listActions(filter) {
+      let q = sb.from('actions').select('*').is('archived_at', null).order('due_date');
+      if (filter?.submissionId) q = q.eq('submission_id', filter.submissionId);
+      if (filter?.investigationId) q = q.eq('investigation_id', filter.investigationId);
+      return unwrap(await q) as Action[];
+    },
+    async getAction(id) {
+      return unwrap(await sb.from('actions').select('*').eq('id', id).maybeSingle()) as Action | null;
+    },
+    async raiseAction(input) {
+      const { id, submission_id, investigation_id, title, description, priority, assignee_id, due_date } = input;
+      return unwrap(await sb.from('actions').insert({ id: id ?? newId(), submission_id: submission_id ?? null, investigation_id: investigation_id ?? null,
+        title, description, priority, assignee_id, due_date }).select().single()) as Action;
+    },
+    async updateAction(id, patch) {
+      const { title, description, priority, assignee_id, due_date, status, status_note } = patch;
+      const row = Object.fromEntries(Object.entries({ title, description, priority, assignee_id, due_date, status, status_note }).filter(([, v]) => v !== undefined));
+      return unwrap(await sb.from('actions').update(row).eq('id', id).select().single()) as Action;
+    },
+    async closeAction(input) {
+      const current = unwrap(await sb.from('actions').select('*').eq('id', input.id).single()) as Action;
+      if (current.status === 'closed') return current; // an earlier (offline) attempt already got through
+      const me = unwrap(await sb.from('profiles').select('organization_id').eq('id', await uid()).single()) as { organization_id: string };
+      const evidence = await uploadList(input.close_evidence, `${me.organization_id}/${input.id}`, 'evidence');
+      return unwrap(await sb.from('actions').update({ status: 'closed', close_comment: input.close_comment, close_evidence: evidence })
+        .eq('id', input.id).select().single()) as Action;
+    },
+
     // ---- scaffolds ---------------------------------------------------------
     async listScaffolds() {
       return unwrap(await sb.from('scaffolds').select('*').is('archived_at', null).order('scaffold_number')) as Scaffold[];

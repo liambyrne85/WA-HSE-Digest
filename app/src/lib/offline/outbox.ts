@@ -4,18 +4,18 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { RecordInput } from '../api/types';
-import type { ScaffoldInspectionInput } from '../types';
+import type { ActionCloseInput, ScaffoldInspectionInput } from '../types';
 import { kvGet, kvSet } from './kv';
 import { isNetworkError, isOnline } from './net';
 
-export type OutboxKind = 'scaffold_inspection' | 'record';
+export type OutboxKind = 'scaffold_inspection' | 'record' | 'action_close';
 export interface OutboxItem {
   id: string;
   kind: OutboxKind;
   /** shown in the sync list, e.g. "Inspection · SCF-PHW-0001" */
   label: string;
   user_id: string;
-  payload: ScaffoldInspectionInput | RecordInput;
+  payload: ScaffoldInspectionInput | RecordInput | ActionCloseInput;
   /** link to open once synced, e.g. /scaffolds/{id} */
   link?: string;
   scaffold_id?: string;
@@ -42,6 +42,7 @@ export async function removeOutboxItem(id: string) {
 
 async function send(item: OutboxItem) {
   if (item.kind === 'scaffold_inspection') return api.submitScaffoldInspection(item.payload as ScaffoldInspectionInput);
+  if (item.kind === 'action_close') return api.closeAction(item.payload as ActionCloseInput);
   return api.saveRecord(item.payload as RecordInput);
 }
 

@@ -513,3 +513,36 @@ export interface ScaffoldDefect {
   closed_at: string | null;
   created_at: string;
 }
+
+// ---- Actions (raised on incidents, audits, field leadership and investigations) --
+export type ActionStatus = 'open' | 'closed' | 'cancelled';
+export type ActionPriority = 'low' | 'medium' | 'high';
+export interface Action {
+  id: string;
+  reference: string | null;
+  submission_id: string | null;
+  investigation_id: string | null;
+  source_module: string | null;
+  source_reference: string | null;
+  project_id: string | null;
+  organization_id: string | null;
+  title: string;
+  description: string | null;
+  priority: ActionPriority;
+  assignee_id: string;
+  due_date: string;
+  status: ActionStatus;
+  close_comment: string | null;
+  /** photos / files (data: URLs before upload, storage references after) */
+  close_evidence: string[];
+  closed_by: string | null;
+  closed_at: string | null;
+  /** reason given when reopened or cancelled */
+  status_note: string | null;
+  raised_by: string;
+  created_at: string;
+  updated_at?: string;
+}
+export type ActionInput = Pick<Action, 'title' | 'description' | 'priority' | 'assignee_id' | 'due_date'>
+  & { id?: string; submission_id?: string | null; investigation_id?: string | null };
+export interface ActionCloseInput { id: string; close_comment: string; close_evidence: string[] }

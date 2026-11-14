@@ -4,7 +4,7 @@ import { computeSummary, MODULE_PREFIX, nextStatus, recordDateFor, resolveSubmit
 import { addDays, perthToday } from '../labels';
 import { bestScaffoldLicence, checklistItems, failedCount, inspectionProblem, licenceRank, nextDueFor } from '../scaffoldLogic';
 import type {
-  FormTemplate, FormTemplateVersion, Investigation, Scaffold, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  Action, ActionInput, FormTemplate, FormTemplateVersion, Investigation, Scaffold, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -12,7 +12,7 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v5';
+const DB_KEY = 'fieldops-demo-db-v6';
 const SESSION_KEY = 'fieldops-demo-session';
 
 // A tiny signature image for the seeded inspections.
@@ -543,6 +543,69 @@ export function createDemoApi(): Api {
     commit();
   }
 
+  // ---- actions (mirror supabase/migrations/*_actions.sql) --------------------
+  const canSeeAction = (a: Action) => {
+    const m = me();
+    if (!m) return false;
+    if (isLeader() || a.assignee_id === m.id || a.raised_by === m.id) return true;
+    const rec = a.submission_id ? db.records.find((x) => x.id === a.submission_id) : undefined;
+    if (rec && canSee(rec)) return true;
+    const inv = a.investigation_id ? db.investigations.find((x) => x.id === a.investigation_id) : undefined;
+    const inc = inv && db.records.find((x) => x.id === inv.incident_id);
+    return !!inv && (inv.lead_id === m.id || (!!inc && canSee(inc)));
+  };
+  const managesAction = (a: Action) => isLeader() || a.raised_by === session?.userId
+    || (isProjectLead() && !!a.project_id && myProjectIds().includes(a.project_id));
+  const notifyAction = (userId: string | null, title: string, body: string, link: string) => {
+    if (!userId || userId === session?.userId) return;
+    db.notifications.unshift({ id: uuid(), user_id: userId, title, body, link, read_at: null, created_at: nowIso() });
+  };
+  const fmt = (d: string) => d.split('-').reverse().join('/');
+  const createAction = (input: ActionInput, raisedBy: string): Action => {
+    const rec = input.submission_id ? db.records.find((x) => x.id === input.submission_id) : undefined;
+    const inv = !rec && input.investigation_id ? db.investigations.find((x) => x.id === input.investigation_id) : undefined;
+    if (!rec && !inv) throw new Error('Record not found');
+    if (!input.title?.trim()) throw new Error('Give the action a title');
+    if (!input.due_date) throw new Error('Set a due date');
+    if (!db.profiles.some((p) => p.id === input.assignee_id && p.is_active)) throw new Error('Assign the action to an active person');
+    db.actCounter = (db.actCounter ?? 0) + 1;
+    const a: Action = {
+      id: input.id ?? uuid(), reference: `ACT-${String(db.actCounter).padStart(5, '0')}`, submission_id: rec?.id ?? null, investigation_id: inv?.id ?? null,
+      source_module: rec ? rec.module : 'investigation', source_reference: rec?.reference ?? inv?.reference ?? null,
+      project_id: rec?.project_id ?? inv?.project_id ?? null, organization_id: rec?.organization_id ?? inv?.organization_id ?? null,
+      title: input.title.trim(), description: input.description ?? null, priority: input.priority ?? 'medium', assignee_id: input.assignee_id,
+      due_date: input.due_date, status: 'open', close_comment: null, close_evidence: [], closed_by: null, closed_at: null, status_note: null,
+      raised_by: raisedBy, created_at: nowIso(), updated_at: nowIso(),
+    };
+    db.actions.push(a);
+    audit('actions', a.id, 'insert', null, a);
+    notifyAction(a.assignee_id, `Action assigned to you: ${a.title}`, `${a.reference} (from ${a.source_reference}) is due ${fmt(a.due_date)}.`, `/actions/${a.id}`);
+    return a;
+  };
+
+  if (!db.actions?.length && !db.actCounter) {
+    db.actions = db.actions ?? [];
+    const se = (desc: string) => db.records.find((x) => x.module === 'safety_event' && String(x.answers?.['q-desc'] ?? '').startsWith(desc));
+    const fl = db.records.find((x) => x.module === 'field_leadership' && x.submitted_by === 'u-sup');
+    const lti = db.investigations.find((i) => i.status === 'in_progress');
+    const drop = se('Scaffold tube dropped');
+    const pinch = se('Pinched finger');
+    const as = (uid: string, fn: () => void) => { const s0 = session; session = { userId: uid, email: '' }; try { fn(); } finally { session = s0; } };
+    as('u-pm', () => {
+      if (drop) {
+        createAction({ submission_id: drop.id, title: 'Tether tools and fit kick plates on lift 4', description: 'Check every bay on berth 3 has toeboards and kick plates before work resumes.', priority: 'high', assignee_id: 'u-emp', due_date: addDays(perthToday(), 2) }, 'u-pm');
+        createAction({ submission_id: drop.id, title: 'Re-brief exclusion zone set-up at toolbox', description: null, priority: 'medium', assignee_id: 'u-sup', due_date: addDays(perthToday(), -1) }, 'u-pm');
+      }
+      if (lti) createAction({ investigation_id: lti.id, title: 'Add an intermediate step to bottom lifts on all access towers', description: 'From the investigation findings: step-off height was 600 mm.', priority: 'high', assignee_id: 'u-pm', due_date: addDays(perthToday(), -3) }, 'u-hset');
+    });
+    if (pinch) {
+      const done = createAction({ submission_id: pinch.id, title: 'Issue cut-resistant gloves to the Acme crew', description: null, priority: 'low', assignee_id: 'u-acme1', due_date: addDays(perthToday(), -2) }, 'u-pm');
+      Object.assign(done, { status: 'closed', close_comment: 'Gloves issued to all six crew at Tuesday pre-start; register signed.', close_evidence: [SIGNATURE], closed_by: 'u-acme1', closed_at: nowIso() });
+    }
+    if (fl) createAction({ submission_id: fl.id, title: 'Replace damaged toeboards at lift 4 bay 2', description: 'Noted during the toolbox talk walk-through.', priority: 'medium', assignee_id: 'u-emp', due_date: addDays(perthToday(), 5) }, 'u-sup');
+    commit();
+  }
+
   const accounts: DemoAccount[] = [
     { id: 'u-admin', label: 'Sam Carter', role: 'admin', description: 'Admin · sees everything, manages people' },
     { id: 'u-hset', label: 'Priya Shah', role: 'hset', description: 'HSET Advisor · sees everything' },
@@ -745,6 +808,7 @@ export function createDemoApi(): Api {
         || (table === 'vehicles' && (await this.listVehicles()).some((v) => v.id === recordId))
         || (table === 'investigations' && (await this.listInvestigations()).some((i) => i.id === recordId))
         || (table === 'scaffolds' && db.scaffolds.some((x) => x.id === recordId && canSeeScaffold(x)))
+        || (table === 'actions' && (db.actions ?? []).some((x) => x.id === recordId && canSeeAction(x)))
         || (table === 'scaffold_defects' && db.scaffoldDefects.some((d) => d.id === recordId && db.scaffolds.some((x) => x.id === d.scaffold_id && canSeeScaffold(x))));
       if (!visible) return delay([]);
       return delay(db.audit.filter((a) => a.table_name === table && a.record_id === recordId));
@@ -1096,6 +1160,75 @@ export function createDemoApi(): Api {
       commit();
       await delay(null);
     },
+    // ---- actions -------------------------------------------------------------
+    async listActions(filter) {
+      if (!me()) return delay([]);
+      return delay((db.actions ?? []).filter((a) => canSeeAction(a)
+        && (!filter?.submissionId || a.submission_id === filter.submissionId)
+        && (!filter?.investigationId || a.investigation_id === filter.investigationId)).sort((a, b) => a.due_date.localeCompare(b.due_date)));
+    },
+    async getAction(id) {
+      const a = (db.actions ?? []).find((x) => x.id === id);
+      return delay(a && canSeeAction(a) ? a : null);
+    },
+    async raiseAction(input) {
+      const m = requireMe();
+      const rec = input.submission_id ? db.records.find((x) => x.id === input.submission_id) : undefined;
+      const inv = input.investigation_id ? db.investigations.find((x) => x.id === input.investigation_id) : undefined;
+      const allowed = isLeader() || (!!rec && canSee(rec)) || (!!inv && (inv.lead_id === m.id || (() => { const inc = db.records.find((x) => x.id === inv.incident_id); return !!inc && canSee(inc); })()));
+      if (!allowed) throw new Error('You can only raise actions on records you can see');
+      if (!isLeader() && !canSeePerson(input.assignee_id)) throw new Error('You can only assign actions to people you can see');
+      const a = createAction(input, m.id);
+      commit();
+      return delay(a);
+    },
+    async updateAction(id, patch) {
+      requireMe();
+      const a = (db.actions ?? []).find((x) => x.id === id);
+      if (!a || !canSeeAction(a)) throw new Error('Action not found');
+      const next: Action = { ...a };
+      const editing = (['title', 'description', 'priority', 'assignee_id', 'due_date'] as const).some((k) => patch[k] !== undefined && patch[k] !== a[k]);
+      if ((editing || patch.status) && !managesAction(a)) throw new Error('Only the person who raised it, Admin/HSET or a project lead can change an action');
+      if (patch.status && patch.status !== a.status) {
+        if (!patch.status_note?.trim()) throw new Error(patch.status === 'open' ? 'Say why the action is being reopened' : 'Say why the action is being cancelled');
+        if (patch.status === 'open' && a.status === 'closed') Object.assign(next, { status: 'open', status_note: patch.status_note, close_comment: null, close_evidence: [], closed_by: null, closed_at: null });
+        else if (patch.status === 'cancelled' && a.status === 'open') Object.assign(next, { status: 'cancelled', status_note: patch.status_note });
+        else throw new Error(`An action can't go from ${a.status} to ${patch.status}`);
+      }
+      if (editing) {
+        if (next.status !== 'open') throw new Error('Reopen the action before changing it');
+        if (patch.assignee_id && patch.assignee_id !== a.assignee_id && !isLeader() && !canSeePerson(patch.assignee_id)) throw new Error('You can only assign actions to people you can see');
+        for (const k of ['title', 'description', 'priority', 'assignee_id', 'due_date'] as const) if (patch[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = patch[k];
+      }
+      next.updated_at = nowIso();
+      audit('actions', a.id, 'update', { ...a }, next);
+      const before = { ...a };
+      Object.assign(a, next);
+      const link = `/actions/${a.id}`;
+      if (a.assignee_id !== before.assignee_id) notifyAction(a.assignee_id, `Action assigned to you: ${a.title}`, `${a.reference} (from ${a.source_reference}) is due ${fmt(a.due_date)}.`, link);
+      if (a.status !== before.status && a.status === 'open') notifyAction(a.assignee_id, `Action reopened: ${a.title}`, `${a.reference} was reopened: ${a.status_note}`, link);
+      if (a.status !== before.status && a.status === 'cancelled') notifyAction(a.assignee_id, `Action cancelled: ${a.title}`, `${a.reference} was cancelled: ${a.status_note}`, link);
+
+      commit();
+      return delay(a);
+    },
+    async closeAction(input) {
+      const m = requireMe();
+      const a = (db.actions ?? []).find((x) => x.id === input.id);
+      if (!a || !canSeeAction(a)) throw new Error('Action not found');
+      if (a.status === 'closed') return delay(a);
+      if (a.status !== 'open') throw new Error('This action is not open');
+      if (a.assignee_id !== m.id) throw new Error('Only the person the action is assigned to can close it out');
+      if (!input.close_comment.trim()) throw new Error('Add a close-out comment');
+      if (!input.close_evidence.length) throw new Error('Attach evidence (a photo or file) to close the action');
+      const next = { ...a, status: 'closed' as const, close_comment: input.close_comment.trim(), close_evidence: input.close_evidence, closed_by: m.id, closed_at: nowIso(), updated_at: nowIso() };
+      audit('actions', a.id, 'update', { ...a }, next);
+      Object.assign(a, next);
+      notifyAction(a.raised_by, `Action closed: ${a.title}`, `${a.reference} was closed out: ${a.close_comment!.slice(0, 200)}`, `/actions/${a.id}`);
+      commit();
+      return delay(a);
+    },
+
     // ---- scaffolds -----------------------------------------------------------
     async listScaffolds() {
       if (!me()) return delay([]);

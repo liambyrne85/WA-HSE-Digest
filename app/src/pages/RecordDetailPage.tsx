@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { ArrowLeft, Check, CheckCircle2, Circle, Clock, MessageSquare, Pencil, Search, Send, Trash2, Truck, X, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ActionsPanel } from '../components/actions/ActionsPanel';
 import { AnswerView } from '../components/forms/AnswerView';
 import { Badge, Button, Card, ErrorBanner, Field, Input, Modal, Select, Spinner, Textarea } from '../components/ui';
 import { useAuth } from '../contexts/AuthContext';
@@ -144,6 +145,10 @@ export default function RecordDetailPage() {
           </Card>
 
           <AnswerView schema={version.schema} answers={r.answers} />
+
+          {['safety_event', 'audit', 'field_leadership'].includes(r.module) && r.status !== 'draft' && (
+            <ActionsPanel submissionId={r.id} canRaise={isLeader || isProjectLead || isOwner} />
+          )}
         </div>
 
         <aside className="space-y-5">

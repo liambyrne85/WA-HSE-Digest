@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { AlertTriangle, ArrowRight, ClipboardList, GraduationCap, MapPin, Truck } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ActionRow } from '../components/actions/ActionsPanel';
 import { SafetyDashboard } from '../components/dashboard/SafetyDashboard';
 import { quickActionsFor } from '../components/layout/quickActions';
 import { Badge, Card, StatCard } from '../components/ui';
@@ -20,7 +21,7 @@ export default function DashboardPage() {
   const isLead = isProjectLead;
 
   const { data } = useAsync(async () => {
-    const [projects, tickets, profiles, orgs, records, approvals, pipelines] = await Promise.all([
+    const [projects, tickets, profiles, orgs, records, approvals, pipelines, actions, people] = await Promise.all([
       api.listProjects(),
       api.listTickets(),
       api.listProfiles(),
@@ -29,8 +30,10 @@ export default function DashboardPage() {
       isWorker ? api.listRecords(undefined, { from: addDays(perthToday(), -60) }) : Promise.resolve([]),
       api.listMyPendingApprovals(),
       api.listPipelines(),
+      api.listActions().catch(() => []),
+      api.listDirectory().catch(() => []),
     ]);
-    return { projects, tickets, profiles, orgs, records, approvals, pipelines };
+    return { projects, tickets, profiles, orgs, records, approvals, pipelines, actions, people };
   }, []);
 
   const activeProjects = data?.projects.filter((p) => p.is_active && p.status === 'active') ?? [];
@@ -82,6 +85,15 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
+
+      {data && data.actions.some((a) => a.assignee_id === profile?.id && a.status === 'open') && (
+        <Card className="mb-7" title="My actions" padded={false}
+          actions={<Link to="/actions" className="flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">All <ArrowRight className="h-4 w-4" /></Link>}>
+          <ul className="divide-y divide-steel-100">
+            {data.actions.filter((a) => a.assignee_id === profile?.id && a.status === 'open').slice(0, 5).map((a) => <ActionRow key={a.id} a={a} people={data.people} showSource />)}
+          </ul>
+        </Card>
+      )}
 
       {(isLeader || isLead) && <SafetyDashboard />}
 

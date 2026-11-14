@@ -5,6 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   Badge, Button, Card, EmptyState, ErrorBanner, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea,
 } from '../components/ui';
+import { ActionsPanel } from '../components/actions/ActionsPanel';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { api } from '../lib/api';
@@ -171,7 +172,7 @@ export function InvestigationDetailPage() {
             <div className="mt-4 space-y-4">
               <Field label="Findings" required={form.status === 'closed'}><Textarea value={form.findings ?? ''} disabled={!canEdit} onChange={(e) => set({ findings: e.target.value })} placeholder="What happened and why" /></Field>
               <Field label="Root cause"><Textarea value={form.root_cause ?? ''} disabled={!canEdit} onChange={(e) => set({ root_cause: e.target.value })} /></Field>
-              <Field label="Corrective actions"><Textarea value={form.corrective_actions ?? ''} disabled={!canEdit} onChange={(e) => set({ corrective_actions: e.target.value })} placeholder="Who does what, by when" /></Field>
+              <Field label="Corrective actions summary" hint="Raise each fix as an action below so it's assigned, tracked and closed out with evidence."><Textarea value={form.corrective_actions ?? ''} disabled={!canEdit} onChange={(e) => set({ corrective_actions: e.target.value })} /></Field>
             </div>
             {canEdit && (
               <div className="mt-4 flex justify-end">
@@ -179,6 +180,7 @@ export function InvestigationDetailPage() {
               </div>
             )}
           </Card>
+          <ActionsPanel investigationId={inv.id} canRaise={canEdit} />
         </div>
         <aside className="space-y-5">
           <Card title="Incident" padded={false}>
