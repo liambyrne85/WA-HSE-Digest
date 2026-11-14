@@ -238,3 +238,22 @@ export function ticketState(expires: string | null): { label: string; color: Bad
 export function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]!.toUpperCase()).join('') || '?';
 }
+
+// ---- Scaffolds -------------------------------------------------------------
+export const SCAFFOLD_TYPE: Record<string, string> = {
+  independent: 'Independent', mobile: 'Mobile', hung: 'Hung', cantilever: 'Cantilever', birdcage: 'Birdcage', other: 'Other',
+};
+export const DUTY_CLASS: Record<string, string> = { light: 'Light duty', medium: 'Medium duty', heavy: 'Heavy duty', special: 'Special duty' };
+export const INSPECTION_TYPE: Record<string, string> = {
+  handover: 'Handover (after erection)', periodic: 'Periodic', alteration: 'After alteration or repair',
+  incident_weather: 'After incident or severe weather', pre_dismantle: 'Before dismantling',
+};
+/** Live status → banner text and colours. */
+export const SCAFFOLD_STATUS: Record<string, { label: string; short: string; color: BadgeColor; banner: string }> = {
+  safe: { label: 'Safe for Use', short: 'Safe', color: 'green', banner: 'bg-emerald-600 text-white' },
+  restricted: { label: 'Restricted Use', short: 'Restricted', color: 'amber', banner: 'bg-amber-400 text-steel-900' },
+  unsafe: { label: 'Unsafe – Do Not Use', short: 'Unsafe', color: 'red', banner: 'bg-red-600 text-white' },
+  overdue: { label: 'Inspection Overdue – Do Not Use', short: 'Overdue', color: 'red', banner: 'bg-red-600 text-white' },
+  awaiting: { label: 'Awaiting Handover – Do Not Use', short: 'Awaiting handover', color: 'red', banner: 'bg-red-600 text-white' },
+  dismantled: { label: 'Dismantled – Not in Service', short: 'Dismantled', color: 'slate', banner: 'bg-steel-700 text-white' },
+};

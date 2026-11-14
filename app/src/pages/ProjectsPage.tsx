@@ -77,6 +77,18 @@ function ProjectForm({ initial, contractors, onClose, onSaved }: {
           <Field label="End date"><Input type="date" value={p.end_date ?? ''} onChange={(e) => set('end_date', e.target.value)} /></Field>
         </div>
         <Field label="Description / scope"><Textarea value={p.description ?? ''} onChange={(e) => set('description', e.target.value)} /></Field>
+        <Field label="Scaffold inspection interval" hint="Days between periodic scaffold inspections on this project. The next due date is worked out from each inspection.">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input type="number" inputMode="numeric" min={1} max={365} className="w-28" value={p.scaffold_inspection_days ?? 30}
+              onChange={(e) => set('scaffold_inspection_days', Math.min(365, Math.max(1, Number(e.target.value) || 30)))} />
+            <span className="text-sm font-semibold text-steel-600">days</span>
+            {[7, 14, 30].map((n) => (
+              <Button key={n} size="sm" variant={(p.scaffold_inspection_days ?? 30) === n ? 'dark' : 'secondary'} onClick={() => set('scaffold_inspection_days', n)}>
+                {n === 7 ? 'Weekly' : n === 14 ? 'Fortnightly' : '30 days'}
+              </Button>
+            ))}
+          </div>
+        </Field>
         <div>
           <span className="label">Contractor companies engaged</span>
           <p className="mb-2 text-xs text-steel-500">Contractors can only see and log records against projects they're engaged on.</p>

@@ -108,6 +108,8 @@ export interface Project {
   end_date: string | null;
   description: string | null;
   created_at: string;
+  /** periodic scaffold inspection interval in days (default 30) */
+  scaffold_inspection_days?: number;
   /** contractor organisations engaged on this project */
   organization_ids?: string[];
 }
@@ -400,4 +402,114 @@ export interface AppSettings {
   accent_color: string;
   dark_color: string;
   logo_url: string | null;
+  /** minimum scaffolding licence class to sign off an inspection */
+  scaffold_min_licence?: LicenceClass;
+}
+
+// ---- Scaffolds (Stage 3) -----------------------------------------------------
+export type LicenceClass = 'Basic' | 'Intermediate' | 'Advanced';
+export type ScaffoldStatus = 'safe' | 'restricted' | 'unsafe' | 'dismantled';
+export type ScaffoldType = 'independent' | 'mobile' | 'hung' | 'cantilever' | 'birdcage' | 'other';
+export type DutyClass = 'light' | 'medium' | 'heavy' | 'special';
+export type InspectionType = 'handover' | 'periodic' | 'alteration' | 'incident_weather' | 'pre_dismantle';
+export type InspectionOutcome = 'safe' | 'restricted' | 'unsafe';
+export type ItemResult = 'pass' | 'fail' | 'na';
+
+export interface Scaffold {
+  id: string;
+  scaffold_number: string | null;
+  project_id: string;
+  location: string;
+  latitude: number | null;
+  longitude: number | null;
+  scaffold_type: ScaffoldType;
+  scaffold_type_other: string | null;
+  duty_class: DutyClass;
+  max_load_kg: number | null;
+  height_m: number | null;
+  lifts: number | null;
+  bays: number | null;
+  erected_by_id: string | null;
+  erected_by_name: string | null;
+  erected_on: string | null;
+  photos: string[];
+  status: ScaffoldStatus;
+  restriction: string | null;
+  status_reason: string | null;
+  last_inspection_id: string | null;
+  last_inspected_at: string | null;
+  next_inspection_due: string | null;
+  dismantled_on: string | null;
+  qr_token: string;
+  notes: string | null;
+  archived_at: string | null;
+  created_at: string;
+}
+
+export interface ChecklistItem { id: string; label: string; help?: string }
+export interface ChecklistSection { id: string; title: string; items: ChecklistItem[] }
+export interface ScaffoldChecklist {
+  id: string;
+  version: number;
+  sections: ChecklistSection[];
+  change_note: string | null;
+  created_at: string;
+}
+
+export interface InspectionItemAnswer {
+  result?: ItemResult;
+  comment?: string;
+  photos?: string[];
+  /** for a failed item: who fixes it and by when */
+  defect_owner_id?: string;
+  defect_due?: string;
+}
+
+export interface ScaffoldInspection {
+  id: string;
+  reference: string | null;
+  scaffold_id: string;
+  project_id: string | null;
+  inspection_type: InspectionType;
+  checklist_id: string;
+  items: Record<string, InspectionItemAnswer>;
+  photos: string[];
+  outcome: InspectionOutcome;
+  restriction: string | null;
+  notes: string | null;
+  inspector_id: string;
+  inspector_name: string | null;
+  inspector_licence_class: string | null;
+  signature: string;
+  signed_at: string;
+  latitude: number | null;
+  longitude: number | null;
+  gps_accuracy_m: number | null;
+  failed_count: number;
+  next_due: string | null;
+  created_at: string;
+}
+
+export type ScaffoldInspectionInput = Pick<ScaffoldInspection, 'id' | 'scaffold_id' | 'inspection_type' | 'checklist_id' | 'items' | 'photos'
+  | 'outcome' | 'restriction' | 'notes' | 'signature' | 'signed_at' | 'latitude' | 'longitude' | 'gps_accuracy_m'>;
+
+export interface ScaffoldDefect {
+  id: string;
+  reference: string | null;
+  scaffold_id: string;
+  inspection_id: string;
+  project_id: string | null;
+  item_id: string;
+  item_label: string | null;
+  section_title: string | null;
+  description: string | null;
+  photos: string[];
+  owner_id: string | null;
+  due_date: string | null;
+  status: 'open' | 'closed';
+  close_photos: string[];
+  close_comment: string | null;
+  closed_by: string | null;
+  closed_at: string | null;
+  created_at: string;
 }

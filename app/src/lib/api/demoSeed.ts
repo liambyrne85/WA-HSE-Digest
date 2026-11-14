@@ -1,7 +1,9 @@
 import type {
   AppSettings, AuditEntry, Investigation, LeadershipTarget, ProjectMember, Vehicle, RecordApproval, RecordEvent, RecordRow, WorkflowModule, FormTemplate, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList, LookupValue,
   Notification, Organization, Profile, Project, TemplateSchema, WorkerTicket, WorkflowPipeline, WorkflowRule,
+  Scaffold, ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection,
 } from '../types';
+import { STARTER_CHECKLIST } from '../scaffoldLogic';
 
 export interface DemoDb {
   organizations: Organization[];
@@ -29,6 +31,13 @@ export interface DemoDb {
   investigations: Investigation[];
   targets: LeadershipTarget[];
   invCounter: number;
+  scaffolds: Scaffold[];
+  scaffoldInspections: ScaffoldInspection[];
+  scaffoldDefects: ScaffoldDefect[];
+  scaffoldChecklists: ScaffoldChecklist[];
+  scaffoldCounters: Record<string, number>;
+  siCounter: number;
+  sdCounter: number;
 }
 
 const now = new Date().toISOString();
@@ -327,7 +336,7 @@ export function buildDemoSeed(): DemoDb {
     rates: Object.entries(rateTable).map(([job_role_id, [cost_rate, charge_rate]]) => ({ job_role_id, cost_rate, charge_rate, currency: 'AUD' })),
     projects: [
       { id: 'p-1', code: 'PHW', name: 'Port Hedland Wharf Upgrade', client_name: 'Pilbara Ports', site_location: 'Port Hedland, WA', status: 'active', is_active: true, start_date: '2026-02-01', end_date: '2027-06-30', description: 'Access scaffolding and hung scaffolds under the wharf deck.', created_at: now, organization_ids: [ORG_ACME, ORG_BRAVO] },
-      { id: 'p-2', code: 'KGP', name: 'Karratha Gas Plant Shutdown', client_name: 'North West Energy', site_location: 'Karratha, WA', status: 'active', is_active: true, start_date: '2026-09-15', end_date: '2026-12-20', description: 'Shutdown access to tanks and pipe racks.', created_at: now, organization_ids: [ORG_ACME] },
+      { id: 'p-2', code: 'KGP', name: 'Karratha Gas Plant Shutdown', client_name: 'North West Energy', site_location: 'Karratha, WA', status: 'active', is_active: true, start_date: '2026-09-15', end_date: '2026-12-20', description: 'Shutdown access to tanks and pipe racks.', created_at: now, organization_ids: [ORG_ACME], scaffold_inspection_days: 7 },
       { id: 'p-3', code: 'EQT', name: 'Elizabeth Quay Tower Facade', client_name: 'Swan Developments', site_location: 'Perth CBD, WA', status: 'planning', is_active: true, start_date: '2027-01-10', end_date: null, description: null, created_at: now, organization_ids: [] },
       { id: 'p-4', code: 'BNH', name: 'Bunbury Harbour Conveyor', client_name: 'South West Ports', site_location: 'Bunbury, WA', status: 'completed', is_active: false, start_date: '2025-03-01', end_date: '2026-04-30', description: null, created_at: now, organization_ids: [] },
     ],
@@ -453,10 +462,17 @@ export function buildDemoSeed(): DemoDb {
       { profile_id: 'u-hset', period: 'month', target: 12 },
     ],
     invCounter: 0,
+    scaffolds: [],
+    scaffoldInspections: [],
+    scaffoldDefects: [],
+    scaffoldChecklists: [{ id: 'cl-1', version: 1, sections: STARTER_CHECKLIST, change_note: 'Initial checklist', created_at: now }],
+    scaffoldCounters: {},
+    siCounter: 0,
+    sdCounter: 0,
     records: [],
     approvals: [],
     events: [],
     counters: {},
-    settings: { company_name: 'Access & Site Services', primary_color: '#2047c6', accent_color: '#f5b81a', dark_color: '#13213f', logo_url: null },
+    settings: { company_name: 'Access & Site Services', primary_color: '#2047c6', accent_color: '#f5b81a', dark_color: '#13213f', logo_url: null, scaffold_min_licence: 'Basic' },
   };
 }

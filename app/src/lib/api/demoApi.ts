@@ -2,8 +2,9 @@ import type { Api, DemoAccount, Session } from './types';
 import { buildDemoSeed, type DemoDb } from './demoSeed';
 import { computeSummary, MODULE_PREFIX, nextStatus, recordDateFor, resolveSubmitStatus, ruleRecord } from '../recordsLogic';
 import { addDays, perthToday } from '../labels';
+import { bestScaffoldLicence, checklistItems, failedCount, inspectionProblem, licenceRank, nextDueFor } from '../scaffoldLogic';
 import type {
-  FormTemplate, FormTemplateVersion, Investigation, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  FormTemplate, FormTemplateVersion, Investigation, Scaffold, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -11,9 +12,11 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v4';
+const DB_KEY = 'fieldops-demo-db-v5';
 const SESSION_KEY = 'fieldops-demo-session';
 
+// A tiny signature image for the seeded inspections.
+const SIGNATURE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80"><path d="M10 60 C 40 10, 60 10, 80 50 S 120 80, 150 30 S 200 20, 230 50" stroke="black" stroke-width="3" fill="none"/></svg>');
 const uuid = () =>
   (crypto as Crypto & { randomUUID?: () => string }).randomUUID?.() ??
   `id-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
@@ -442,6 +445,104 @@ export function createDemoApi(): Api {
     commit();
   }
 
+  // ---- scaffolds (mirror supabase/migrations/*_scaffolds.sql) ---------------
+  const minLicence = () => db.settings.scaffold_min_licence ?? 'Basic';
+  const canInspect = (pid: string) => {
+    const p = db.profiles.find((x) => x.id === pid && x.is_active);
+    return !!p?.is_scaffold_inspector && licenceRank(bestScaffoldLicence(db.tickets, pid)) >= licenceRank(minLicence());
+  };
+  const canSeeScaffold = (sc: Scaffold) => isLeader() || myProjectIds().includes(sc.project_id);
+  const canManageScaffold = (projectId: string) => isLeader() || (isProjectLead() && myProjectIds().includes(projectId));
+  const token = () => (uuid() + uuid()).replace(/-/g, '');
+  const createScaffold = (row: Partial<Scaffold>): Scaffold => {
+    const n = (db.scaffoldCounters[row.project_id!] ?? 0) + 1;
+    db.scaffoldCounters[row.project_id!] = n;
+    const code = (db.projects.find((p) => p.id === row.project_id)?.code ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase() || 'GEN';
+    const sc: Scaffold = {
+      id: row.id ?? uuid(), scaffold_number: `SCF-${code}-${String(n).padStart(4, '0')}`, project_id: row.project_id!, location: row.location ?? '',
+      latitude: row.latitude ?? null, longitude: row.longitude ?? null, scaffold_type: row.scaffold_type ?? 'independent',
+      scaffold_type_other: row.scaffold_type_other ?? null, duty_class: row.duty_class ?? 'light', max_load_kg: row.max_load_kg ?? null,
+      height_m: row.height_m ?? null, lifts: row.lifts ?? null, bays: row.bays ?? null, erected_by_id: row.erected_by_id ?? null,
+      erected_by_name: row.erected_by_name ?? null, erected_on: row.erected_on ?? null, photos: row.photos ?? [],
+      status: 'unsafe', restriction: null, status_reason: 'Awaiting handover inspection', last_inspection_id: null, last_inspected_at: null,
+      next_inspection_due: null, dismantled_on: null, qr_token: token(), notes: row.notes ?? null, archived_at: null, created_at: nowIso(),
+    };
+    db.scaffolds.push(sc);
+    audit('scaffolds', sc.id, 'insert', null, sc);
+    return sc;
+  };
+  const insertInspection = (input: ScaffoldInspectionInput, inspectorId: string): ScaffoldInspection => {
+    const sc = db.scaffolds.find((x) => x.id === input.scaffold_id && !x.archived_at);
+    if (!sc) throw new Error('Scaffold not found');
+    const cl = db.scaffoldChecklists.find((c) => c.id === input.checklist_id);
+    if (!cl) throw new Error('Checklist not found');
+    const problem = inspectionProblem(cl, input);
+    if (problem) throw new Error(problem);
+    if (Date.parse(input.signed_at) > Date.now() + 600000) throw new Error('The signed time is in the future');
+    db.siCounter += 1;
+    const days = db.projects.find((p) => p.id === sc.project_id)?.scaffold_inspection_days ?? 30;
+    const ins: ScaffoldInspection = {
+      ...input, reference: `SI-${String(db.siCounter).padStart(5, '0')}`, project_id: sc.project_id,
+      restriction: input.outcome === 'restricted' ? input.restriction : null, inspector_id: inspectorId,
+      inspector_name: db.profiles.find((p) => p.id === inspectorId)?.full_name ?? null,
+      inspector_licence_class: bestScaffoldLicence(db.tickets, inspectorId), failed_count: failedCount(cl, input.items),
+      next_due: nextDueFor(input.outcome, input.signed_at, days), created_at: nowIso(),
+    };
+    db.scaffoldInspections.push(ins);
+    audit('scaffold_inspections', ins.id, 'insert', null, ins);
+    if (!sc.last_inspected_at || ins.signed_at >= sc.last_inspected_at) {
+      const before = { ...sc };
+      Object.assign(sc, { status: ins.outcome, restriction: ins.restriction, status_reason: ins.outcome === 'unsafe' ? `Failed inspection ${ins.reference}` : null,
+        last_inspection_id: ins.id, last_inspected_at: ins.signed_at, next_inspection_due: ins.next_due, dismantled_on: null });
+      audit('scaffolds', sc.id, 'update', before, sc);
+    }
+    for (const it of checklistItems(cl.sections)) {
+      const a = ins.items[it.id];
+      if (a?.result !== 'fail') continue;
+      db.sdCounter += 1;
+      const d: ScaffoldDefect = {
+        id: uuid(), reference: `SD-${String(db.sdCounter).padStart(5, '0')}`, scaffold_id: sc.id, inspection_id: ins.id, project_id: sc.project_id,
+        item_id: it.id, item_label: it.label, section_title: it.section.title, description: a.comment?.trim() || null, photos: a.photos ?? [],
+        owner_id: a.defect_owner_id || inspectorId, due_date: a.defect_due || addDays(perthToday(new Date(ins.signed_at)), 7), status: 'open',
+        close_photos: [], close_comment: null, closed_by: null, closed_at: null, created_at: nowIso(),
+      };
+      db.scaffoldDefects.push(d);
+      audit('scaffold_defects', d.id, 'insert', null, d);
+    }
+    return ins;
+  };
+
+  if (!db.scaffolds?.length && !db.siCounter) {
+    Object.assign(db, { scaffolds: db.scaffolds ?? [], scaffoldInspections: db.scaffoldInspections ?? [], scaffoldDefects: db.scaffoldDefects ?? [], scaffoldCounters: db.scaffoldCounters ?? {} });
+    const cl = db.scaffoldChecklists[0]!;
+    const allPass = () => Object.fromEntries(checklistItems(cl.sections).map((i) => [i.id, { result: 'pass' as const }]));
+    const ago = (days: number, hhmm = '07:30') => new Date(Date.parse(`${addDays(perthToday(), -days)}T${hhmm}:00+08:00`)).toISOString();
+    const insp = (sc: Scaffold, days: number, type: ScaffoldInspection['inspection_type'], outcome: ScaffoldInspection['outcome'],
+      extra: Record<string, ScaffoldInspection['items'][string]> = {}, restriction: string | null = null, who = 'u-emp') =>
+      insertInspection({ id: uuid(), scaffold_id: sc.id, inspection_type: type, checklist_id: cl.id, items: { ...allPass(), ...extra }, photos: [],
+        outcome, restriction, notes: null, signature: SIGNATURE, signed_at: ago(days), latitude: -20.3106, longitude: 118.5753, gps_accuracy_m: 8 }, who);
+    const base = { erected_by_name: 'Access & Site Services crew', photos: [] as string[] };
+    const s1 = createScaffold({ ...base, project_id: 'p-1', location: 'Berth 3 – hung scaffold under conveyor, bays 12–16', scaffold_type: 'hung', duty_class: 'medium', max_load_kg: 450, height_m: 6, lifts: 3, bays: 5, erected_on: addDays(perthToday(), -12), erected_by_id: 'u-emp' });
+    insp(s1, 12, 'handover', 'safe'); insp(s1, 5, 'periodic', 'safe');
+    const s2 = createScaffold({ ...base, project_id: 'p-1', location: 'Ship loader SL-2 access tower', scaffold_type: 'independent', duty_class: 'heavy', max_load_kg: 675, height_m: 18, lifts: 9, bays: 2, erected_on: addDays(perthToday(), -20) });
+    insp(s2, 20, 'handover', 'safe');
+    insp(s2, 2, 'alteration', 'restricted', { 'edg-toe': { result: 'fail', comment: 'Toeboards missing on lift 6, bay 2', defect_owner_id: 'u-sup' } }, 'Light duty only, max 2 persons, lifts 1–5 only');
+    const s3 = createScaffold({ ...base, project_id: 'p-1', location: 'Conveyor CV-07 transfer tower', scaffold_type: 'independent', duty_class: 'medium', max_load_kg: 450, height_m: 9, lifts: 4, bays: 3, erected_on: addDays(perthToday(), -40) });
+    insp(s3, 38, 'handover', 'safe');
+    const s4 = createScaffold({ ...base, project_id: 'p-1', location: 'Wharf deck – mobile tower near bollard 14', scaffold_type: 'mobile', duty_class: 'light', max_load_kg: 225, height_m: 4, lifts: 2, bays: 1, erected_on: addDays(perthToday(), -15) });
+    insp(s4, 15, 'handover', 'safe');
+    insp(s4, 9, 'incident_weather', 'unsafe', {
+      'tie-secure': { result: 'fail', comment: 'Outrigger bent after strong winds', defect_owner_id: 'u-pm', defect_due: addDays(perthToday(), -2) },
+      'fnd-ground': { result: 'fail', comment: 'Castor locks not holding' } });
+    const s5 = createScaffold({ ...base, project_id: 'p-2', location: 'Tank 2 internal birdcage', scaffold_type: 'birdcage', duty_class: 'medium', max_load_kg: 450, height_m: 12, lifts: 6, bays: 16, erected_on: addDays(perthToday(), -11) });
+    insp(s5, 11, 'handover', 'safe'); insp(s5, 4, 'periodic', 'safe');
+    createScaffold({ ...base, project_id: 'p-2', location: 'Pipe rack PR-4, grid lines 7–9', scaffold_type: 'cantilever', duty_class: 'light', max_load_kg: 225, height_m: 7, lifts: 3, bays: 4, erected_on: perthToday() });
+    const s7 = createScaffold({ ...base, project_id: 'p-1', location: 'Old stacker access stair', scaffold_type: 'independent', duty_class: 'light', max_load_kg: 225, height_m: 5, lifts: 2, bays: 2, erected_on: addDays(perthToday(), -60) });
+    insp(s7, 50, 'handover', 'safe'); insp(s7, 6, 'pre_dismantle', 'safe');
+    Object.assign(s7, { status: 'dismantled', dismantled_on: addDays(perthToday(), -5), restriction: null });
+    commit();
+  }
+
   const accounts: DemoAccount[] = [
     { id: 'u-admin', label: 'Sam Carter', role: 'admin', description: 'Admin · sees everything, manages people' },
     { id: 'u-hset', label: 'Priya Shah', role: 'hset', description: 'HSET Advisor · sees everything' },
@@ -642,7 +743,9 @@ export function createDemoApi(): Api {
       if (!m) return delay([]);
       const visible = isLeader() || (table === 'profiles' && recordId === m.id)
         || (table === 'vehicles' && (await this.listVehicles()).some((v) => v.id === recordId))
-        || (table === 'investigations' && (await this.listInvestigations()).some((i) => i.id === recordId));
+        || (table === 'investigations' && (await this.listInvestigations()).some((i) => i.id === recordId))
+        || (table === 'scaffolds' && db.scaffolds.some((x) => x.id === recordId && canSeeScaffold(x)))
+        || (table === 'scaffold_defects' && db.scaffoldDefects.some((d) => d.id === recordId && db.scaffolds.some((x) => x.id === d.scaffold_id && canSeeScaffold(x))));
       if (!visible) return delay([]);
       return delay(db.audit.filter((a) => a.table_name === table && a.record_id === recordId));
     },
@@ -992,6 +1095,112 @@ export function createDemoApi(): Api {
       if (ex) Object.assign(ex, t); else db.targets.push({ ...t });
       commit();
       await delay(null);
+    },
+    // ---- scaffolds -----------------------------------------------------------
+    async listScaffolds() {
+      if (!me()) return delay([]);
+      return delay(db.scaffolds.filter((x) => !x.archived_at && canSeeScaffold(x)).sort((a, b) => (a.scaffold_number ?? '').localeCompare(b.scaffold_number ?? '')));
+    },
+    async saveScaffold(input) {
+      requireMe();
+      const ex = input.id ? db.scaffolds.find((x) => x.id === input.id) : undefined;
+      if (!ex) {
+        if (!input.project_id || !canManageScaffold(input.project_id)) throw new Error('Only Admin, HSET or a PM / Supervisor on the project can register scaffolds');
+        if (!input.location?.trim()) throw new Error('Location is required');
+        const sc = createScaffold(input);
+        commit();
+        return delay(sc);
+      }
+      if (!canSeeScaffold(ex) || !canManageScaffold(ex.project_id)) throw new Error('Permission denied');
+      if (input.project_id && input.project_id !== ex.project_id && !isLeader()) throw new Error('Only Admin or HSET can move a scaffold to another project');
+      const next: Scaffold = { ...ex, ...input, id: ex.id, scaffold_number: ex.scaffold_number, qr_token: ex.qr_token, created_at: ex.created_at,
+        last_inspection_id: ex.last_inspection_id, last_inspected_at: ex.last_inspected_at, next_inspection_due: ex.next_inspection_due };
+      if (next.status !== ex.status) {
+        if (next.status === 'unsafe') {
+          if (!next.status_reason?.trim() || next.status_reason === ex.status_reason) throw new Error('Give a reason when tagging a scaffold Unsafe');
+          next.restriction = null;
+        } else if (next.status === 'dismantled') {
+          next.dismantled_on = next.dismantled_on ?? perthToday();
+          next.restriction = null;
+        } else throw new Error('A scaffold can only be made Safe or Restricted by an inspection');
+      } else {
+        next.restriction = ex.restriction;
+        if (next.status !== 'unsafe') next.status_reason = ex.status_reason;
+      }
+      audit('scaffolds', ex.id, 'update', { ...ex }, next);
+      Object.assign(ex, next);
+      commit();
+      return delay(ex);
+    },
+    async listScaffoldInspections(scaffoldId) {
+      if (!me()) return delay([]);
+      return delay(db.scaffoldInspections.filter((i) => (!scaffoldId || i.scaffold_id === scaffoldId)
+        && db.scaffolds.some((x) => x.id === i.scaffold_id && canSeeScaffold(x))).sort((a, b) => b.signed_at.localeCompare(a.signed_at)));
+    },
+    async getScaffoldInspection(id) {
+      const i = db.scaffoldInspections.find((x) => x.id === id);
+      return delay(i && db.scaffolds.some((x) => x.id === i.scaffold_id && canSeeScaffold(x)) ? i : null);
+    },
+    async submitScaffoldInspection(input) {
+      const m = requireMe();
+      const existing = db.scaffoldInspections.find((x) => x.id === input.id);
+      if (existing) return delay(existing);
+      if (!canInspect(m.id)) throw new Error('Only a competent scaffold inspector with a current scaffolding licence can sign off an inspection');
+      const sc = db.scaffolds.find((x) => x.id === input.scaffold_id);
+      if (!sc || !canSeeScaffold(sc)) throw new Error('Scaffold not found');
+      const ins = insertInspection(input, m.id);
+      commit();
+      return delay(ins);
+    },
+    async listScaffoldDefects(scaffoldId) {
+      if (!me()) return delay([]);
+      return delay(db.scaffoldDefects.filter((d) => (!scaffoldId || d.scaffold_id === scaffoldId)
+        && db.scaffolds.some((x) => x.id === d.scaffold_id && canSeeScaffold(x))).sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? '')));
+    },
+    async saveScaffoldDefect(d) {
+      const m = requireMe();
+      const ex = db.scaffoldDefects.find((x) => x.id === d.id);
+      if (!ex || !(isLeader() || ex.owner_id === m.id || (isProjectLead() && !!ex.project_id && myProjectIds().includes(ex.project_id)))) throw new Error('Permission denied');
+      const next: ScaffoldDefect = { ...ex };
+      if (d.owner_id !== undefined) next.owner_id = d.owner_id;
+      if (d.due_date !== undefined) next.due_date = d.due_date;
+      if (d.close_comment !== undefined) next.close_comment = d.close_comment;
+      if (d.close_photos !== undefined) next.close_photos = d.close_photos;
+      if (d.status === 'closed' && ex.status !== 'closed') {
+        if (!next.close_photos.length) throw new Error('Add a photo of the fix to close the defect');
+        Object.assign(next, { status: 'closed', closed_by: m.id, closed_at: nowIso() });
+      } else if (d.status === 'open') Object.assign(next, { status: 'open', closed_by: null, closed_at: null });
+      audit('scaffold_defects', ex.id, 'update', { ...ex }, next);
+      Object.assign(ex, next);
+      commit();
+      return delay(ex);
+    },
+    async getScaffoldChecklist(id) {
+      const list = [...db.scaffoldChecklists].sort((a, b) => b.version - a.version);
+      return delay((id ? list.find((c) => c.id === id) : list[0]) ?? null);
+    },
+    async listScaffoldChecklists() {
+      return delay([...db.scaffoldChecklists].sort((a, b) => b.version - a.version));
+    },
+    async publishScaffoldChecklist(sections, changeNote) {
+      requireAdmin();
+      if (!sections.length) throw new Error('The checklist needs at least one section');
+      if (sections.some((x) => !x.items.length)) throw new Error('Every checklist section needs at least one item');
+      const c = { id: uuid(), version: Math.max(0, ...db.scaffoldChecklists.map((x) => x.version)) + 1, sections, change_note: changeNote ?? null, created_at: nowIso() };
+      db.scaffoldChecklists.push(c);
+      audit('scaffold_checklists', c.id, 'insert', null, c);
+      commit();
+      return delay(c);
+    },
+    async myInspectorStatus() {
+      const m = me();
+      if (!m) return delay({ ok: false, licenceClass: null, reason: 'Not signed in' });
+      const licenceClass = bestScaffoldLicence(db.tickets, m.id) as LicenceClass | null;
+      if (canInspect(m.id)) return delay({ ok: true, licenceClass });
+      const reason = !m.is_scaffold_inspector ? 'You are not marked as a competent scaffold inspector on your profile.'
+        : !licenceClass ? 'You need a current scaffolding licence (HRW) on your profile.'
+        : `Your ${licenceClass} licence is below the minimum (${minLicence()}) for signing off inspections.`;
+      return delay({ ok: false, licenceClass, reason });
     },
     subscribeChanges(cb) {
       changeListeners.add(cb);

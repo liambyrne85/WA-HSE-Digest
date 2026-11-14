@@ -7,6 +7,7 @@ import { ConfirmProvider } from './contexts/ConfirmContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import './index.css';
+import { startOutbox } from './lib/offline/outbox';
 
 // A data router (rather than <BrowserRouter>) so pages can use useBlocker for unsaved-change guards.
 // VITE_MEMORY_ROUTER=1 is used for the single-file preview build, which runs inside a sandboxed frame without real URLs.
@@ -27,6 +28,14 @@ const router = createRouter([
     ),
   },
 ], { basename: import.meta.env.VITE_MEMORY_ROUTER === '1' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });
+
+// Offline: cache the app itself (service worker) and send anything saved with no coverage.
+if (import.meta.env.PROD && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch(() => undefined);
+  });
+}
+startOutbox();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
