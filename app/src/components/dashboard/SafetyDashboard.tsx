@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import {
-  AlertTriangle, ArrowRight, ChevronDown, Download, FileDown, Radio, Search, ShieldAlert, Target, Truck, X,
+  AlertTriangle, ArrowRight, ChevronDown, Construction, Download, FileDown, Radio, Search, ShieldAlert, Target, Truck, X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -9,7 +9,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import { api } from '../../lib/api';
 import {
-  LEADER_ROLES, thisWeek, tileIncidents, tileInvestigations, tileLeadership, tilePrestarts,
+  LEADER_ROLES, thisWeek, tileIncidents, tileInvestigations, tileLeadership, tilePrestarts, tileScaffolds,
   type DashData, type DashFilters, type Rag,
 } from '../../lib/dashboard';
 import { buildTables, exportCsv, exportPdf, filterSummary, type TileKey } from '../../lib/dashboardExport';
@@ -74,13 +74,14 @@ export function SafetyDashboard() {
   const { data, error, reload } = useAsync(async (): Promise<DashData> => {
     // Load a little either side so the date filter can change without a refetch.
     // Safety events are loaded in full so open investigations can show their incident.
-    const [ranged, events, vehicles, investigations, targets, profiles, projects, members] = await Promise.all([
+    const [ranged, events, vehicles, investigations, targets, profiles, projects, members, scaffolds, scaffoldDefects] = await Promise.all([
       api.listRecords(undefined, { from: addDays(f.from, -1), to: addDays(f.to, 1) }), api.listRecords('safety_event'),
       api.listVehicles(), api.listInvestigations(), api.listTargets(), api.listProfiles(), api.listProjects(), api.listProjectMembers(),
+      api.listScaffolds().catch(() => []), api.listScaffoldDefects().catch(() => []),
     ]);
     setUpdatedAt(new Date());
     const records = [...ranged.filter((r) => ['plant_prestart', 'field_leadership'].includes(r.module)), ...events];
-    return { records, vehicles, investigations, targets, profiles, projects, members };
+    return { records, vehicles, investigations, targets, profiles, projects, members, scaffolds, scaffoldDefects };
   }, [f.from, f.to]);
 
   // Live: refresh when records, vehicles, investigations or targets change.
@@ -91,7 +92,7 @@ export function SafetyDashboard() {
   }, [open]);
 
   const t = useMemo(() => data && {
-    pre: tilePrestarts(f, data), inv: tileInvestigations(f, data), inc: tileIncidents(f, data), fl: tileLeadership(f, data),
+    pre: tilePrestarts(f, data), inv: tileInvestigations(f, data), inc: tileIncidents(f, data), fl: tileLeadership(f, data), sc: tileScaffolds(f, data),
   }, [data, f.projectId, f.leaderId, f.from, f.to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error && !data) return <ErrorBanner message={error} onRetry={reload} />;
@@ -111,6 +112,7 @@ export function SafetyDashboard() {
         { label: 'Vehicles out of service', value: String(t.pre.outOfService.length) },
         { label: 'Open investigations', value: `${t.inv.open.length} (${t.inv.overdue.length} overdue)` },
         { label: 'Incidents', value: String(t.inc.incidents.length) },
+        { label: 'Scaffolds overdue / unsafe', value: `${t.sc.overdue.length} / ${t.sc.unsafe.length}` },
         { label: 'Field leadership', value: `${t.fl.completed} of ${t.fl.target || '—'}${t.fl.pct !== null ? ` (${t.fl.pct}%)` : ''}` },
       ], `${settings.company_name || 'Safety'} – safety dashboard`, filterSummary(f, data), f);
     } catch (e) { toast(errMsg(e), 'error'); }
@@ -164,7 +166,7 @@ export function SafetyDashboard() {
 
       {!t ? <Spinner /> : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
             <Tile active={open === 'prestarts'} onClick={() => set({ tile: open === 'prestarts' ? null : 'prestarts' })}
               icon={<Truck className="h-6 w-6" />} label="Vehicle pre-starts not done" value={t.pre.missed.length}
               tone={t.pre.missed.length ? 'red' : 'green'}
@@ -190,6 +192,14 @@ export function SafetyDashboard() {
               sub={<>
                 <span className="text-xs font-semibold text-steel-600">{t.fl.completed} done of {t.fl.target || 'no'} target</span>
                 <SubCount n={t.fl.rows.filter((r) => r.rag === 'red').length} label="leaders in red" bad />
+              </>} />
+            <Tile active={open === 'scaffolds'} onClick={() => set({ tile: open === 'scaffolds' ? null : 'scaffolds' })}
+              icon={<Construction className="h-6 w-6" />} label="Scaffolds overdue for inspection" value={t.sc.overdue.length}
+              tone={t.sc.overdue.length || t.sc.unsafe.length ? 'red' : t.sc.dueWeek.length ? 'amber' : 'green'}
+              sub={<>
+                <SubCount n={t.sc.dueWeek.length} label="due in 7 days" />
+                <SubCount n={t.sc.unsafe.length} label="tagged Unsafe" bad />
+                <SubCount n={t.sc.defects.length} label="open defects" bad />
               </>} />
           </div>
 
@@ -249,6 +259,30 @@ export function SafetyDashboard() {
                       ))}
                       {!t.inc.incidents.length && <Empty>No incidents in this period.</Empty>}
                     </ul>
+                  </div>
+                )}
+                {open === 'scaffolds' && (
+                  <div className="divide-y divide-steel-100">
+                    <Group title="Inspection overdue — do not use" count={t.sc.overdue.length}>
+                      {t.sc.overdue.map((s) => <Row key={s.id} danger to={`/scaffolds/${s.id}`} title={`${s.scaffold_number} · ${s.location}`}
+                        meta={[projName(s.project_id), `was due ${formatDate(s.next_inspection_due)}`]} badge={<Badge color="red">Overdue</Badge>} />)}
+                    </Group>
+                    <Group title="Tagged Unsafe" count={t.sc.unsafe.length}>
+                      {t.sc.unsafe.map((s) => <Row key={s.id} to={`/scaffolds/${s.id}`} title={`${s.scaffold_number} · ${s.location}`}
+                        meta={[projName(s.project_id), s.status_reason]} badge={<Badge color="red">Unsafe</Badge>} />)}
+                    </Group>
+                    <Group title="Inspection due in the next 7 days" count={t.sc.dueWeek.length}>
+                      {t.sc.dueWeek.map((s) => <Row key={s.id} to={`/scaffolds/${s.id}`} title={`${s.scaffold_number} · ${s.location}`}
+                        meta={[projName(s.project_id), `due ${formatDate(s.next_inspection_due)}`]} badge={<Badge color="amber">Due soon</Badge>} />)}
+                    </Group>
+                    <Group title="Open scaffold defects" count={t.sc.defects.length}>
+                      {t.sc.defects.map((x) => {
+                        const late = (daysUntil(x.due_date) ?? 0) < 0;
+                        return <Row key={x.id} danger={late} to={`/scaffolds/${x.scaffold_id}`} title={`${x.reference} · ${x.item_label}`}
+                          meta={[data.scaffolds?.find((s) => s.id === x.scaffold_id)?.scaffold_number, person(x.owner_id), `due ${formatDate(x.due_date)}`]}
+                          badge={<Badge color={late ? 'red' : 'orange'}>{late ? 'Overdue' : 'Open'}</Badge>} />;
+                      })}
+                    </Group>
                   </div>
                 )}
                 {open === 'leadership' && (

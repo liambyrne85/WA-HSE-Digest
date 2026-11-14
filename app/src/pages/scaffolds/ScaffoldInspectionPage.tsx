@@ -2,7 +2,10 @@ import { clsx } from 'clsx';
 import { ArrowLeft, MapPin } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { StoredImage } from '../../components/forms/AnswerView';
-import { Badge, Card, ErrorBanner, Spinner } from '../../components/ui';
+import { Badge, Button, Card, ErrorBanner, Spinner } from '../../components/ui';
+import { PrintTagModal } from '../../components/scaffolds/PrintTag';
+import { Printer } from 'lucide-react';
+import { useState } from 'react';
 import { api } from '../../lib/api';
 import { INSPECTION_TYPE, SCAFFOLD_STATUS, formatDate, formatDateTime } from '../../lib/labels';
 import type { ScaffoldChecklist, ScaffoldDefect, ScaffoldInspection } from '../../lib/types';
@@ -45,6 +48,7 @@ export function InspectionReport({ ins, checklist, defects = [] }: { ins: Scaffo
 
 export default function ScaffoldInspectionPage() {
   const { id } = useParams();
+  const [printing, setPrinting] = useState(false);
   const { data, loading, error } = useAsync(async () => {
     const ins = await api.getScaffoldInspection(id!);
     if (!ins) throw new Error("This inspection doesn't exist or you don't have access to it.");
@@ -52,7 +56,9 @@ export default function ScaffoldInspectionPage() {
       api.getScaffoldChecklist(ins.checklist_id), api.listScaffolds(), api.listScaffoldDefects(ins.scaffold_id),
     ]);
     if (!checklist) throw new Error('Checklist not found');
-    return { ins, checklist, s: scaffolds.find((x) => x.id === ins.scaffold_id), defects: defects.filter((d) => d.inspection_id === ins.id) };
+    const s = scaffolds.find((x) => x.id === ins.scaffold_id);
+    const project = s ? (await api.listProjects()).find((p) => p.id === s.project_id) : undefined;
+    return { ins, checklist, s, project, defects: defects.filter((d) => d.inspection_id === ins.id) };
   }, [id]);
 
   if (loading && !data) return <Spinner />;
@@ -73,6 +79,10 @@ export default function ScaffoldInspectionPage() {
         </div>
       </div>
 
+      {s && s.last_inspection_id === ins.id && (
+        <Button size="lg" block className="mb-4" icon={<Printer className="h-6 w-6" />} onClick={() => setPrinting(true)}>Print tag</Button>
+      )}
+      {printing && s && <PrintTagModal scaffold={s} inspection={ins} projectName={data.project ? `${data.project.code ? `${data.project.code} – ` : ''}${data.project.name}` : ''} onClose={() => setPrinting(false)} />}
       <div className={clsx('mb-4 rounded-xl px-4 py-4', st.banner)}>
         <p className="font-display text-2xl font-bold uppercase">Result: {st.label}</p>
         {ins.restriction && <p className="font-semibold">{ins.restriction}</p>}

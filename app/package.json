@@ -14,10 +14,12 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "@types/qrcode": "^1.5.5",
     "clsx": "^2.1.1",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.460.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.1"

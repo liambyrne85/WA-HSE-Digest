@@ -2,6 +2,7 @@ import type {
   AppRole, AppSettings, AuditEntry, Investigation, LeadershipTarget, Vehicle, DirectoryEntry, FormTemplate, ProjectMember, FormTemplateVersion, Invitation, JobRole, JobRoleRate, LookupList,
   LookupValue, Notification, Organization, Profile, Project, TemplateCategory, WorkerTicket,
   Action, ActionInput, ActionCloseInput, ActionStatus,
+  PublicScaffoldResult, TagPrint,
   Scaffold, ScaffoldChecklist, ChecklistSection, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass,
   WorkflowModule, WorkflowPipeline, WorkflowRule, WorkflowTrigger, RecordApproval, RecordEvent, RecordRow,
 } from '../types';
@@ -193,6 +194,12 @@ export interface Api {
   updateAction(id: string, patch: Partial<ActionInput> & { status?: ActionStatus; status_note?: string }): Promise<Action>;
   /** the person assigned closes out with a comment and evidence (data: URLs uploaded); idempotent */
   closeAction(input: ActionCloseInput): Promise<Action>;
+
+  // QR page and tags
+  /** what a scaff tag's QR code shows (no sign-in needed unless an Admin requires it) */
+  getPublicScaffold(token: string): Promise<PublicScaffoldResult>;
+  listTagPrints(scaffoldId: string): Promise<TagPrint[]>;
+  recordTagPrint(p: Pick<TagPrint, 'scaffold_id' | 'inspection_id' | 'label_size' | 'method' | 'printer' | 'copies'>): Promise<TagPrint>;
 
   // scaffolds
   listScaffolds(): Promise<Scaffold[]>;

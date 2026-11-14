@@ -416,6 +416,11 @@ export interface AppSettings {
   email_from?: string | null;
   /** web address of the app, used for links in emails */
   app_url?: string | null;
+  /** QR pages need a sign-in (otherwise anyone who scans can read them) */
+  qr_requires_login?: boolean;
+  tag_label_size?: LabelSizeKey;
+  tag_custom_width_mm?: number | null;
+  tag_custom_height_mm?: number | null;
   /** minimum scaffolding licence class to sign off an inspection */
   scaffold_min_licence?: LicenceClass;
 }
@@ -560,3 +565,38 @@ export interface Action {
 export type ActionInput = Pick<Action, 'title' | 'description' | 'priority' | 'assignee_id' | 'due_date'>
   & { id?: string; submission_id?: string | null; investigation_id?: string | null };
 export interface ActionCloseInput { id: string; close_comment: string; close_evidence: string[] }
+
+// ---- Public QR page (Stage 4) ------------------------------------------------
+export interface PublicScaffoldView {
+  as_of: string;
+  company: { name: string; logo_url: string | null };
+  scaffold: {
+    scaffold_number: string; project_name: string; project_code: string | null; location: string;
+    scaffold_type: ScaffoldType; scaffold_type_other: string | null; duty_class: DutyClass; max_load_kg: number | null;
+    height_m: number | null; lifts: number | null; bays: number | null; erected_on: string | null;
+    status: ScaffoldStatus; live_status: 'safe' | 'restricted' | 'unsafe' | 'overdue' | 'awaiting' | 'dismantled';
+    restriction: string | null; status_reason: string | null; next_inspection_due: string | null; last_inspected_at: string | null;
+    dismantled_on: string | null; photos: string[]; open_defects: number;
+  };
+  latest: {
+    reference: string; inspection_type: InspectionType; inspector_name: string | null; inspector_licence_class: string | null;
+    signed_at: string; next_due: string | null; outcome: InspectionOutcome; restriction: string | null; notes: string | null;
+    failed_count: number; photos: string[]; checklist_version: number; sections: ChecklistSection[];
+    items: Record<string, { result?: ItemResult; comment?: string; photos?: string[] }>;
+  } | null;
+  history: { reference: string; inspection_type: InspectionType; signed_at: string; outcome: InspectionOutcome; inspector_name: string | null; failed_count: number }[];
+}
+export type PublicScaffoldResult = { status: 'ok'; view: PublicScaffoldView } | { status: 'login_required' } | { status: 'not_found' };
+
+export type LabelSizeKey = '100x150' | '4x6' | '62mm' | 'custom';
+export interface TagPrint {
+  id: string;
+  scaffold_id: string;
+  inspection_id: string | null;
+  label_size: string;
+  method: 'pdf' | 'direct';
+  printer: string | null;
+  copies: number;
+  printed_by: string;
+  printed_at: string;
+}

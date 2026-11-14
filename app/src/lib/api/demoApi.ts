@@ -2,9 +2,9 @@ import type { Api, DemoAccount, Session } from './types';
 import { buildDemoSeed, type DemoDb } from './demoSeed';
 import { computeSummary, MODULE_PREFIX, nextStatus, recordDateFor, resolveSubmitStatus, ruleRecord } from '../recordsLogic';
 import { addDays, perthToday } from '../labels';
-import { bestScaffoldLicence, checklistItems, failedCount, inspectionProblem, licenceRank, nextDueFor } from '../scaffoldLogic';
+import { bestScaffoldLicence, checklistItems, failedCount, inspectionProblem, licenceRank, liveStatus, nextDueFor } from '../scaffoldLogic';
 import type {
-  Action, ActionInput, FormTemplate, FormTemplateVersion, Investigation, Scaffold, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
+  Action, ActionInput, PublicScaffoldView, TagPrint, FormTemplate, FormTemplateVersion, Investigation, Scaffold, ScaffoldDefect, ScaffoldInspection, ScaffoldInspectionInput, LicenceClass, Profile, ProjectMember, RecordApproval, RecordRow, Vehicle, WorkflowModule, WorkflowRule, WorkflowTrigger,
 } from '../types';
 
 /**
@@ -12,7 +12,7 @@ import type {
  * policies so each role sees what it would see in production. It is NOT a
  * security boundary — production access control lives in Postgres RLS.
  */
-const DB_KEY = 'fieldops-demo-db-v7';
+const DB_KEY = 'fieldops-demo-db-v8';
 const SESSION_KEY = 'fieldops-demo-session';
 
 // A tiny signature image for the seeded inspections.
@@ -1204,6 +1204,55 @@ export function createDemoApi(): Api {
       commit();
       await delay(null);
     },
+    // ---- QR page and tags -----------------------------------------------------
+    async getPublicScaffold(token) {
+      if (db.settings.qr_requires_login && !me()) return delay({ status: 'login_required' as const });
+      const sc = db.scaffolds.find((x) => x.qr_token === token && !x.archived_at);
+      if (!sc || token.length < 32) return delay({ status: 'not_found' as const });
+      const p = db.projects.find((x) => x.id === sc.project_id);
+      const live = liveStatus(sc);
+      const last = db.scaffoldInspections.find((i) => i.id === sc.last_inspection_id);
+      const cl = last && db.scaffoldChecklists.find((c) => c.id === last.checklist_id);
+      const view: PublicScaffoldView = {
+        as_of: nowIso(),
+        company: { name: db.settings.company_name, logo_url: db.settings.logo_url },
+        scaffold: {
+          scaffold_number: sc.scaffold_number ?? '', project_name: p?.name ?? '', project_code: p?.code ?? null, location: sc.location,
+          scaffold_type: sc.scaffold_type, scaffold_type_other: sc.scaffold_type_other, duty_class: sc.duty_class, max_load_kg: sc.max_load_kg,
+          height_m: sc.height_m, lifts: sc.lifts, bays: sc.bays, erected_on: sc.erected_on, status: sc.status,
+          live_status: live === 'safe' || live === 'restricted' || live === 'unsafe' || live === 'overdue' || live === 'awaiting' || live === 'dismantled' ? live : 'unsafe',
+          restriction: sc.restriction, status_reason: sc.status_reason, next_inspection_due: sc.next_inspection_due, last_inspected_at: sc.last_inspected_at,
+          dismantled_on: sc.dismantled_on, photos: sc.photos.filter((x) => !x.startsWith('storage:')),
+          open_defects: db.scaffoldDefects.filter((d) => d.scaffold_id === sc.id && d.status === 'open').length,
+        },
+        latest: last && cl ? {
+          reference: last.reference ?? '', inspection_type: last.inspection_type, inspector_name: last.inspector_name, inspector_licence_class: last.inspector_licence_class,
+          signed_at: last.signed_at, next_due: last.next_due, outcome: last.outcome, restriction: last.restriction, notes: last.notes, failed_count: last.failed_count,
+          photos: last.photos, checklist_version: cl.version, sections: cl.sections,
+          items: Object.fromEntries(Object.entries(last.items).map(([k, v]) => [k, { result: v.result, comment: v.comment, photos: v.photos }])),
+        } : null,
+        history: db.scaffoldInspections.filter((i) => i.scaffold_id === sc.id).sort((a, b) => b.signed_at.localeCompare(a.signed_at)).slice(0, 30)
+          .map((i) => ({ reference: i.reference ?? '', inspection_type: i.inspection_type, signed_at: i.signed_at, outcome: i.outcome, inspector_name: i.inspector_name, failed_count: i.failed_count })),
+      };
+      return delay({ status: 'ok' as const, view });
+    },
+    async listTagPrints(scaffoldId) {
+      const sc = db.scaffolds.find((x) => x.id === scaffoldId);
+      if (!sc || !canSeeScaffold(sc)) return delay([]);
+      return delay((db.tagPrints ?? []).filter((t) => t.scaffold_id === scaffoldId).sort((a, b) => b.printed_at.localeCompare(a.printed_at)));
+    },
+    async recordTagPrint(p) {
+      const m = requireMe();
+      const sc = db.scaffolds.find((x) => x.id === p.scaffold_id);
+      if (!sc || !canSeeScaffold(sc)) throw new Error('Scaffold not found');
+      if (p.inspection_id && !db.scaffoldInspections.some((i) => i.id === p.inspection_id && i.scaffold_id === sc.id)) throw new Error('That inspection is for a different scaffold');
+      const row: TagPrint = { id: uuid(), ...p, printed_by: m.id, printed_at: nowIso() };
+      db.tagPrints = [...(db.tagPrints ?? []), row];
+      audit('scaffold_tag_prints', row.id, 'insert', null, row);
+      commit();
+      return delay(row);
+    },
+
     // ---- actions -------------------------------------------------------------
     async listActions(filter) {
       if (!me()) return delay([]);
